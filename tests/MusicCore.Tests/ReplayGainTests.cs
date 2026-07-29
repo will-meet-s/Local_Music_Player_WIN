@@ -1,4 +1,4 @@
-using MusicCore.Playback;
+﻿using MusicCore.Playback;
 using Xunit;
 
 namespace MusicCore.Tests;

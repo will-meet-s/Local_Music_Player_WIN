@@ -1,4 +1,4 @@
-using MusicCore.Lyrics;
+﻿using MusicCore.Lyrics;
 using MusicCore.Models;
 using Xunit;
 

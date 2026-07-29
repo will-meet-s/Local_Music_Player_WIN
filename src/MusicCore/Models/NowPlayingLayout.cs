@@ -1,4 +1,4 @@
-namespace MusicCore.Models;
+﻿namespace MusicCore.Models;
 
 /// <summary>右侧「正在播放」区的展示模式。</summary>
 public enum NowPlayingLayout

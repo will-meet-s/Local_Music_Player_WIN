@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using MusicCore.Library;
 using MusicCore.Lyrics;
 using MusicCore.Models;
@@ -448,25 +448,41 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
         _ = PerformScanAsync(folder, reportEmpty: false);
     }
 
+    /// <summary>
+    /// 调用方是 <c>_ = PerformScanAsync(...)</c>，异常没有任何人接 —— 一旦抛出，
+    /// 列表会永远空着、IsScanning 卡在 true 把刷新按钮锁死，而界面上不留一点线索。
+    /// 所以这里自己兜住，把失败原因显示出来并解锁状态。
+    /// </summary>
     private async Task PerformScanAsync(string folder, bool reportEmpty)
     {
         IsScanning = true;
 
-        var paths = await Task.Run(() => LibraryScanner.Scan(folder));
+        try
+        {
+            var paths = await Task.Run(() => LibraryScanner.Scan(folder));
 
-        // 复用已有条目，避免重扫时把整库的元数据全部重读一遍
-        var known = _library.ToDictionary(t => t.Path, StringComparer.OrdinalIgnoreCase);
-        _library = paths
-            .Select(p => known.TryGetValue(p, out var existing) ? existing : new Track(p))
-            .ToList();
+            // 复用已有条目，避免重扫时把整库的元数据全部重读一遍
+            var known = _library.ToDictionary(t => t.Path, StringComparer.OrdinalIgnoreCase);
+            _library = paths
+                .Select(p => known.TryGetValue(p, out var existing) ? existing : new Track(p))
+                .ToList();
 
-        Raise(nameof(Library));
-        Raise(nameof(LibraryCount));
-        RebuildDisplayed();
-        IsScanning = false;
+            Raise(nameof(Library));
+            Raise(nameof(LibraryCount));
+            RebuildDisplayed();
 
-        if (_library.Count == 0 && reportEmpty)
-            ErrorMessage = "该文件夹下没有找到受支持的音频文件";
+            if (_library.Count == 0 && reportEmpty)
+                ErrorMessage = "该文件夹下没有找到受支持的音频文件";
+        }
+        catch (Exception e)
+        {
+            ErrorMessage = $"扫描失败：{e.Message}";
+            return;
+        }
+        finally
+        {
+            IsScanning = false;
+        }
 
         _ = LoadMetadataAsync();
     }

@@ -1,4 +1,4 @@
-using MusicCore.Models;
+﻿using MusicCore.Models;
 
 namespace MusicCore.Playback;
 

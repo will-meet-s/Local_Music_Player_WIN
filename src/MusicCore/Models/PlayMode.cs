@@ -1,4 +1,4 @@
-namespace MusicCore.Models;
+﻿namespace MusicCore.Models;
 
 /// <summary>播放顺序模式。</summary>
 public enum PlayMode

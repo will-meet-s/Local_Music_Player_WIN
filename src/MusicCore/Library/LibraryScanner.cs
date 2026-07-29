@@ -1,4 +1,4 @@
-namespace MusicCore.Library;
+﻿namespace MusicCore.Library;
 
 /// <summary>递归扫描目录，收集受支持的音频文件。</summary>
 public static class LibraryScanner

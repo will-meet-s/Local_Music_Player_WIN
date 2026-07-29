@@ -1,4 +1,4 @@
-namespace MusicCore.Library;
+﻿namespace MusicCore.Library;
 
 /// <summary>
 /// 自然序字符串比较：把连续数字当成一个整体比大小，所以 <c>track2</c> 排在 <c>track10</c> 前面。

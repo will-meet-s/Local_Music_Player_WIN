@@ -1,4 +1,4 @@
-namespace MusicCore.Playback;
+﻿namespace MusicCore.Playback;
 
 /// <summary>一条待播条目：文件路径 + 已算好的音量归一化系数 + 采样率。</summary>
 /// <param name="Gain">线性增益系数，1 表示不做处理。</param>

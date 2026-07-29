@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using MusicCore.Library;
 using MusicCore.Lyrics;
 using MusicCore.Models;

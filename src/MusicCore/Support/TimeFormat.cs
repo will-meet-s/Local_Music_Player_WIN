@@ -1,4 +1,4 @@
-namespace MusicCore.Support;
+﻿namespace MusicCore.Support;
 
 /// <summary>把秒格式化为 <c>m:ss</c> 或 <c>h:mm:ss</c>。</summary>
 public static class TimeFormat

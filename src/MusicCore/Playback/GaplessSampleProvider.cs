@@ -1,4 +1,4 @@
-using NAudio.Wave;
+﻿using NAudio.Wave;
 
 namespace MusicCore.Playback;
 

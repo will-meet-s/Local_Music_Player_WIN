@@ -1,4 +1,4 @@
-namespace MusicCore.Models;
+﻿namespace MusicCore.Models;
 
 /// <summary>一行带时间戳的歌词。</summary>
 /// <param name="Index">排序后的序号，用于滚动定位。</param>

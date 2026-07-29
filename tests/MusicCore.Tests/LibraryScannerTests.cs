@@ -1,4 +1,4 @@
-using MusicCore.Library;
+﻿using MusicCore.Library;
 using Xunit;
 
 namespace MusicCore.Tests;

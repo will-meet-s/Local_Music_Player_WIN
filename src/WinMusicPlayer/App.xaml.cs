@@ -1,4 +1,5 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
+using System.Threading.Tasks;
 using System.Windows;
 using MusicCore.ViewModels;
 
@@ -14,6 +15,7 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        HookExceptionLogging();
 
         _viewModel = new PlayerViewModel();
         _viewModel.PropertyChanged += OnViewModelChanged;
@@ -28,6 +30,35 @@ public partial class App : Application
 
         // 上次退出时开着桌面歌词，这次自动恢复
         if (_viewModel.DesktopLyricsEnabled) ShowDesktopLyrics();
+    }
+
+    /// <summary>
+    /// 三个入口都要接：UI 线程的异常走 DispatcherUnhandledException，
+    /// 后台线程的走 AppDomain（此时已无法挽救，只能留下日志），
+    /// 而 fire-and-forget 的 Task 异常谁都不抛，只能靠 UnobservedTaskException。
+    /// </summary>
+    private void HookExceptionLogging()
+    {
+        DispatcherUnhandledException += (_, args) =>
+        {
+            CrashLog.Write("Dispatcher", args.Exception);
+            MessageBox.Show(
+                $"发生未处理异常，已记录到：\n{CrashLog.FilePath}\n\n" +
+                $"{args.Exception.GetType().Name}: {args.Exception.Message}",
+                "WinMusicPlayer", MessageBoxButton.OK, MessageBoxImage.Error);
+
+            // 标记已处理，先别让进程退出 —— 闪退时什么都看不到，最难查
+            args.Handled = true;
+        };
+
+        AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+            CrashLog.Write("AppDomain", args.ExceptionObject as Exception);
+
+        TaskScheduler.UnobservedTaskException += (_, args) =>
+        {
+            CrashLog.Write("Task", args.Exception);
+            args.SetObserved();
+        };
     }
 
     private void OnViewModelChanged(object? sender, PropertyChangedEventArgs e)

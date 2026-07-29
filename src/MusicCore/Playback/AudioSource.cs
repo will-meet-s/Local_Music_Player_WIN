@@ -1,4 +1,4 @@
-using NAudio.Wave;
+﻿using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
 
 namespace MusicCore.Playback;
