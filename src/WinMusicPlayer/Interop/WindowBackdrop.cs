@@ -23,6 +23,16 @@ public static class WindowBackdrop
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
 
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmExtendFrameIntoClientArea(IntPtr hwnd, ref Margins margins);
+
+    /// <summary>四边都取 -1 即「整窗玻璃」，让 DWM 在整个客户区里绘制材质。</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Margins
+    {
+        public int Left, Right, Top, Bottom;
+    }
+
     public static bool IsSupported =>
         Environment.OSVersion.Version.Build >= 22621;
 
@@ -60,6 +70,12 @@ public static class WindowBackdrop
         var backdrop = BackdropAcrylic;
         var backdropHr = DwmSetWindowAttribute(handle, DwmwaSystemBackdropType, ref backdrop, sizeof(int));
 
+        // 只设 backdrop type 不够：客户区默认不参与 DWM 的材质合成，
+        // 把 WPF 背景清空后看到的是纯黑而不是磨砂。必须把框架扩展到整个
+        // 客户区（四边 -1），DWM 才会在这块区域里画材质。
+        var margins = new Margins { Left = -1, Right = -1, Top = -1, Bottom = -1 };
+        var frameHr = DwmExtendFrameIntoClientArea(handle, ref margins);
+
         // 让 DWM 的材质透上来。两层都要清：
         // 1) WPF 逻辑层的窗口背景刷；
         // 2) HwndSource 的合成表面底色 —— 它默认不透明，会把材质整块盖住，
@@ -75,8 +91,8 @@ public static class WindowBackdrop
 
         Diagnostics = $"build={Environment.OSVersion.Version.Build} " +
                       $"darkHr=0x{darkHr:X8} backdropHr=0x{backdropHr:X8} " +
-                      $"compositionCleared={cleared}";
+                      $"frameHr=0x{frameHr:X8} compositionCleared={cleared}";
 
-        return backdropHr == 0 && cleared;
+        return backdropHr == 0 && frameHr == 0 && cleared;
     }
 }
