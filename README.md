@@ -1,6 +1,6 @@
 # WinMusicPlayer
 
-Windows 本地音乐播放器。C# + WPF (.NET 8)，与 [MacMusicPlayer](https://github.com/will-meet-s/Local_Music_Player_MAC)
+Windows 本地音乐播放器。C# + WPF (.NET 10)，与 [MacMusicPlayer](https://github.com/will-meet-s/Local_Music_Player_MAC)
 功能对齐，另加**桌面歌词**。
 
 ## 功能
@@ -21,7 +21,7 @@ Windows 本地音乐播放器。C# + WPF (.NET 8)，与 [MacMusicPlayer](https:/
 ## 环境要求
 
 - Windows 10 1809+（FLAC / ALAC 解码依赖系统自带的 Media Foundation 解码器）
-- .NET 8 SDK（开发）/ .NET 8 桌面运行时（运行）
+- .NET 10 SDK（开发）/ .NET 10 桌面运行时（运行）
 
 ## 构建运行
 
@@ -43,7 +43,9 @@ dotnet publish src\WinMusicPlayer -c Release -r win-x64 --self-contained true `
 |---|---|
 | [NAudio](https://github.com/naudio/NAudio) | 音频解码与 WASAPI 输出 |
 | [TagLibSharp](https://github.com/mono/taglib-sharp) | 标签读取：ID3v2 / Vorbis Comment / MP4 atom / APE |
-| System.Text.Encoding.CodePages | GB18030，读旧版中文 `.lrc` 用 |
+
+读旧版中文 `.lrc` 需要的 GB18030 编码由框架自带的 `CodePagesEncodingProvider` 提供
+（.NET 10 已内置，不再需要 `System.Text.Encoding.CodePages` 包引用）。
 
 ## 桌面歌词
 

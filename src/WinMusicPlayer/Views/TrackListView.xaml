@@ -83,7 +83,8 @@
                     </ComboBoxItem>
                 </ComboBox>
 
-                <Button Grid.Column="1" Style="{StaticResource IconButton}"
+                <!-- 同上：Style 由下面的 Button.Style 提供（BasedOn IconButton） -->
+                <Button Grid.Column="1"
                         Margin="4,0,0,0" FontSize="13"
                         Command="{Binding ToggleSortDirectionCommand}">
                     <Button.Style>

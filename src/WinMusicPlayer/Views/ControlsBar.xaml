@@ -40,7 +40,9 @@
                 <Button Style="{StaticResource IconButton}" Content="&#xE892;"
                         Command="{Binding PreviousCommand}" ToolTip="上一首" />
 
-                <Button Style="{StaticResource PrimaryIconButton}" Margin="10,0"
+                <!-- Style 只能设一次：图标与 ToolTip 随 IsPlaying 变，所以走下面的
+                     Button.Style（已 BasedOn PrimaryIconButton），这里不能再写 Style attribute -->
+                <Button Margin="10,0"
                         Command="{Binding PlayPauseCommand}">
                     <Button.Style>
                         <Style TargetType="Button" BasedOn="{StaticResource PrimaryIconButton}">
