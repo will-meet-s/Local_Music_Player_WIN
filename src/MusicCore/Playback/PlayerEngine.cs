@@ -141,9 +141,15 @@ public sealed class PlayerEngine : IDisposable
         _progressTimer.Start();
     }
 
+    /// <summary>
+    /// 用 Stop 而不是 Pause：WasapiOut.Pause() 只改状态、不停 audio client，
+    /// 渲染线程停止填缓冲后设备仍按节奏取数据，会把最后一段缓冲反复播放，
+    /// 听上去就是持续的卡顿声。Stop() 停掉 client；播放位置在
+    /// GaplessSampleProvider 里而不在设备上，所以 Play() 能从原位接着走。
+    /// </summary>
     public void Pause()
     {
-        lock (_gate) _output?.Pause();
+        lock (_gate) _output?.Stop();
         IsPlaying = false;
         _progressTimer.Stop();
     }
@@ -169,7 +175,8 @@ public sealed class PlayerEngine : IDisposable
 
         lock (_gate)
         {
-            _output?.Pause();
+            // 同 Pause()：必须 Stop，否则设备会继续循环最后一段缓冲
+            _output?.Stop();
             _pipeline?.SetCurrent(null);
             _hasPreloaded = false;
         }
