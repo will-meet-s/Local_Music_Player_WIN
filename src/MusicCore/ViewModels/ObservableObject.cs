@@ -50,7 +50,16 @@ public sealed class RelayCommand<T> : ICommand
 
     public RelayCommand(Action<T> execute) => _execute = execute;
 
-    public event EventHandler? CanExecuteChanged;
+    /// <summary>
+    /// CanExecute 恒为 true，没有会变化的状态，所以这个事件永远不需要触发。
+    /// 空访问器满足 ICommand 契约，同时消掉 CS0067（声明了事件却从不使用）。
+    /// 哪天这个命令加上 canExecute 谓词，就换回自动事件并补 RaiseCanExecuteChanged。
+    /// </summary>
+    public event EventHandler? CanExecuteChanged
+    {
+        add { }
+        remove { }
+    }
 
     public bool CanExecute(object? parameter) => true;
 
