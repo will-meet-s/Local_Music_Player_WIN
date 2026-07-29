@@ -37,10 +37,14 @@
                         Command="{Binding ChooseFolderCommand}"
                         ToolTip="选择音乐文件夹">
                     <StackPanel Orientation="Horizontal">
-                        <TextBlock FontFamily="{StaticResource IconFont}" Text="&#xE8B7;" />
-                        <!-- 必须显式指定正文字体：父级 IconButton 的 Segoe MDL2 Assets 没有 CJK 字形 -->
-                        <TextBlock Text="选择文件夹" Margin="6,0,0,0"
-                                   FontFamily="{StaticResource UiFont}" />
+                        <!-- 图标比文字略大一点才压得住，但不能沿用样式里 16 的字号，
+                             那个尺寸是给纯图标按钮定的，和文字并排会显得笨重 -->
+                        <TextBlock FontFamily="{StaticResource IconFont}" Text="&#xE8B7;"
+                                   FontSize="15" VerticalAlignment="Center" />
+                        <!-- 必须显式指定正文字体：父级 IconButton 的图标字体没有 CJK 字形 -->
+                        <TextBlock Text="选择文件夹" Margin="7,0,0,0"
+                                   FontFamily="{StaticResource UiFont}" FontSize="13"
+                                   VerticalAlignment="Center" />
                     </StackPanel>
                 </Button>
 

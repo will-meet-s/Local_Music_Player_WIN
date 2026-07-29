@@ -24,8 +24,12 @@
             <SolidColorBrush x:Key="ControlFillBrush" Color="#18FFFFFF" />
             <SolidColorBrush x:Key="SidebarBrush" Color="#14FFFFFF" />
 
-            <!-- Windows 自带的图标字体，免去引入图标库 -->
-            <FontFamily x:Key="IconFont">Segoe MDL2 Assets</FontFamily>
+            <!--
+              Windows 自带的图标字体，免去引入图标库。
+              Segoe Fluent Icons 是 Win11 的字集，笔画更细、圆角更统一；
+              Win10 上没有这个字体，WPF 会按逗号顺序回退到 MDL2。
+            -->
+            <FontFamily x:Key="IconFont">Segoe Fluent Icons, Segoe MDL2 Assets</FontFamily>
 
             <!--
               正文字体。IconFont 只含私用区图标、没有 CJK 字形，凡是落在
@@ -83,6 +87,109 @@
                 <Setter Property="FontSize" Value="13" />
                 <Setter Property="Padding" Value="6,3" />
                 <Setter Property="Foreground" Value="White" />
+            </Style>
+
+            <!-- 下拉面板底色。半透明底色在磨砂窗口上会透出下层文字，这里用不透明深色 -->
+            <SolidColorBrush x:Key="PopupBrush" Color="#FF23232A" />
+
+            <!--
+              ComboBox 必须整套重画：默认 Aero2 模板的按钮面和下拉面板都是写死的浅色，
+              只改 Background 改不动它，而全局 TextBlock 前景是近白色 —— 于是白底白字。
+            -->
+            <Style TargetType="ComboBox">
+                <Setter Property="FontFamily" Value="{StaticResource UiFont}" />
+                <Setter Property="FontSize" Value="13" />
+                <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+                <Setter Property="Padding" Value="9,5" />
+                <Setter Property="Cursor" Value="Hand" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="ComboBox">
+                            <Grid>
+                                <!-- 整块面（含右侧箭头）由这个 ToggleButton 负责，点它开合下拉 -->
+                                <ToggleButton x:Name="Toggle" Focusable="False" ClickMode="Press"
+                                              IsChecked="{Binding IsDropDownOpen, Mode=TwoWay,
+                                                          RelativeSource={RelativeSource TemplatedParent}}">
+                                    <ToggleButton.Template>
+                                        <ControlTemplate TargetType="ToggleButton">
+                                            <Border x:Name="Bd"
+                                                    Background="{StaticResource ControlFillBrush}"
+                                                    BorderBrush="{StaticResource SeparatorBrush}"
+                                                    BorderThickness="1" CornerRadius="5">
+                                                <TextBlock HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                           Margin="0,0,9,0" FontSize="11"
+                                                           FontFamily="{StaticResource IconFont}"
+                                                           Foreground="{StaticResource SecondaryTextBrush}"
+                                                           Text="&#xE70D;" />
+                                            </Border>
+                                            <ControlTemplate.Triggers>
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter TargetName="Bd" Property="Background" Value="#26FFFFFF" />
+                                                </Trigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </ToggleButton.Template>
+                                </ToggleButton>
+
+                                <!-- 当前选中项。IsHitTestVisible=False 让点击穿到上面的 ToggleButton -->
+                                <ContentPresenter IsHitTestVisible="False"
+                                                  Margin="{TemplateBinding Padding}"
+                                                  HorizontalAlignment="Left" VerticalAlignment="Center"
+                                                  Content="{TemplateBinding SelectionBoxItem}"
+                                                  ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                                  ContentStringFormat="{TemplateBinding SelectionBoxItemStringFormat}" />
+
+                                <Popup x:Name="PART_Popup" Placement="Bottom" Focusable="False"
+                                       AllowsTransparency="True" PopupAnimation="Fade"
+                                       IsOpen="{TemplateBinding IsDropDownOpen}">
+                                    <Border Background="{StaticResource PopupBrush}"
+                                            BorderBrush="{StaticResource SeparatorBrush}"
+                                            BorderThickness="1" CornerRadius="5"
+                                            Margin="0,3,0,0" Padding="3"
+                                            MinWidth="{Binding ActualWidth,
+                                                       RelativeSource={RelativeSource TemplatedParent}}"
+                                            MaxHeight="{TemplateBinding MaxDropDownHeight}">
+                                        <ScrollViewer>
+                                            <ItemsPresenter />
+                                        </ScrollViewer>
+                                    </Border>
+                                </Popup>
+                            </Grid>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsEnabled" Value="False">
+                                    <Setter Property="Opacity" Value="0.35" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <Style TargetType="ComboBoxItem">
+                <Setter Property="FontFamily" Value="{StaticResource UiFont}" />
+                <Setter Property="FontSize" Value="13" />
+                <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+                <Setter Property="Padding" Value="8,5" />
+                <Setter Property="Cursor" Value="Hand" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="ComboBoxItem">
+                            <Border x:Name="Bd" Background="Transparent" CornerRadius="4"
+                                    Padding="{TemplateBinding Padding}">
+                                <ContentPresenter VerticalAlignment="Center" />
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <!-- IsHighlighted 覆盖鼠标悬停与键盘上下移动两种情况 -->
+                                <Trigger Property="IsHighlighted" Value="True">
+                                    <Setter TargetName="Bd" Property="Background" Value="#26FFFFFF" />
+                                </Trigger>
+                                <Trigger Property="IsSelected" Value="True">
+                                    <Setter TargetName="Bd" Property="Background" Value="#335CA8FF" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
             </Style>
 
             <Style TargetType="TextBlock">
