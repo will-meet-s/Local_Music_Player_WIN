@@ -31,12 +31,11 @@ dotnet test                                     # 跑单元测试
 dotnet run --project src\WinMusicPlayer          # 直接运行
 
 # 发布成单个 exe（自带运行时，对方不用装 .NET）
-dotnet publish src\WinMusicPlayer -p:PublishProfile=win-x86
+dotnet publish src\WinMusicPlayer -p:PublishProfile=win-x64
 ```
 
-产物是 `publish\win-x86\WinMusicPlayer.exe`，**只有这一个文件**，可以随意拷到桌面或别的机器
-（32 位程序在 64 位 Windows 上通过 WOW64 正常运行）。
-参数都写在 `src\WinMusicPlayer\Properties\PublishProfiles\win-x86.pubxml` 里，其中
+产物是 `publish\win-x64\WinMusicPlayer.exe`，**只有这一个文件**，可以随意拷到桌面或别的机器。
+参数都写在 `src\WinMusicPlayer\Properties\PublishProfiles\win-x64.pubxml` 里，其中
 `IncludeNativeLibrariesForSelfExtract` 是关键 —— 少了它，WPF 的原生库会散落在 exe 旁边，
 单独把 exe 拖走就打不开。
 
