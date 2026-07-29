@@ -52,7 +52,8 @@ public static class LrcParser
     /// 从行首连续切出所有 <c>[...]</c> 时间戳，返回时间列表与剩余文本。
     /// 遇到第一个非时间戳的 <c>[...]</c>（例如 <c>[ti:标题]</c>）即停止，该行被视为无时间戳。
     /// </summary>
-    private static (List<double> Times, string Rest) SplitTimestamps(string line)
+    // 元素名不能叫 Rest：那是 ValueTuple 的保留成员名，编译器会报 CS8126
+    private static (List<double> Times, string Remainder) SplitTimestamps(string line)
     {
         var times = new List<double>();
         var rest = line.AsSpan();

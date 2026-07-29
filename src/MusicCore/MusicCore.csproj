@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <TargetFramework>net10.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
@@ -20,7 +20,7 @@
     <!-- 标签读取：ID3v2 / Vorbis Comment / MP4 atom 全支持，含歌词、封面、ReplayGain -->
     <PackageReference Include="TagLibSharp" Version="2.3.0" />
     <!-- .NET Core 默认不带 GB18030 等中文代码页，读旧版 .lrc 需要 -->
-    <PackageReference Include="System.Text.Encoding.CodePages" Version="8.0.0" />
+    <PackageReference Include="System.Text.Encoding.CodePages" Version="10.0.0" />
   </ItemGroup>
 
 </Project>
