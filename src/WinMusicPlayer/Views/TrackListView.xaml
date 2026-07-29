@@ -31,10 +31,12 @@
                                  CaretBrush="{StaticResource TextBrush}"
                                  VerticalContentAlignment="Center"
                                  Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged, Delay=120}" />
-                        <!-- 占位符：TextBox 为空且未聚焦时显示 -->
+                        <!-- 占位符：TextBox 为空且未聚焦时显示。
+                             用 Secondary 而非 Tertiary：搜索框自带半透明底，
+                             叠在磨砂背景上时 Tertiary 的对比度只有 2.8:1，看不清 -->
                         <TextBlock Text="搜索歌曲、歌手、专辑" IsHitTestVisible="False"
                                    VerticalAlignment="Center"
-                                   Foreground="{StaticResource TertiaryTextBrush}">
+                                   Foreground="{StaticResource SecondaryTextBrush}">
                             <TextBlock.Style>
                                 <Style TargetType="TextBlock">
                                     <Setter Property="Visibility" Value="Collapsed" />

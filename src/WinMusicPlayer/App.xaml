@@ -19,7 +19,12 @@
             <SolidColorBrush x:Key="AccentBrush" Color="{StaticResource AccentColor}" />
             <SolidColorBrush x:Key="TextBrush" Color="#FFF2F2F5" />
             <SolidColorBrush x:Key="SecondaryTextBrush" Color="#FFA0A0AC" />
-            <SolidColorBrush x:Key="TertiaryTextBrush" Color="#FF70707A" />
+            <!--
+              第三级文字。原本是 #70707A，在磨砂背景（约 #2A2A2E）上对比度只有
+              2.8:1，远低于正文所需的 4.5:1；而磨砂会随桌面明暗浮动，本来就该留余量。
+              提到 #8F8F9B 后约 4.4:1，仍明显弱于二级文字（5.4:1），层级不丢。
+            -->
+            <SolidColorBrush x:Key="TertiaryTextBrush" Color="#FF8F8F9B" />
             <SolidColorBrush x:Key="SeparatorBrush" Color="#22FFFFFF" />
             <SolidColorBrush x:Key="ControlFillBrush" Color="#18FFFFFF" />
             <SolidColorBrush x:Key="SidebarBrush" Color="#14FFFFFF" />
