@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- PlaybackQueue 的内部顺序表、LibraryScanner.Sort 等需要对测试可见 -->
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
+      <_Parameter1>MusicCore.Tests</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 音频解码与输出（WASAPI 共享 / 独占） -->
+    <PackageReference Include="NAudio" Version="2.2.1" />
+    <!-- 标签读取：ID3v2 / Vorbis Comment / MP4 atom 全支持，含歌词、封面、ReplayGain -->
+    <PackageReference Include="TagLibSharp" Version="2.3.0" />
+    <!-- .NET Core 默认不带 GB18030 等中文代码页，读旧版 .lrc 需要 -->
+    <PackageReference Include="System.Text.Encoding.CodePages" Version="8.0.0" />
+  </ItemGroup>
+
+</Project>

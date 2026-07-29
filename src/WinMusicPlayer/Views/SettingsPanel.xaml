@@ -1,0 +1,69 @@
+<UserControl x:Class="WinMusicPlayer.Views.SettingsPanel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <Border Width="360" Background="#F21E1E22" CornerRadius="10" Padding="16"
+            BorderBrush="#33FFFFFF" BorderThickness="1">
+        <Border.Effect>
+            <DropShadowEffect Color="Black" BlurRadius="18" ShadowDepth="3" Opacity="0.5" />
+        </Border.Effect>
+
+        <StackPanel>
+
+            <!-- 音频 -->
+            <TextBlock Text="音频" FontWeight="SemiBold" Margin="0,0,0,8" />
+
+            <CheckBox IsChecked="{Binding ReplayGainEnabled}">
+                <StackPanel>
+                    <TextBlock Text="音量归一化" />
+                    <TextBlock Text="按文件里的 ReplayGain 标签补偿响度差异。没打标签的文件不受影响。"
+                               FontSize="11" TextWrapping="Wrap"
+                               Foreground="{StaticResource SecondaryTextBrush}" />
+                </StackPanel>
+            </CheckBox>
+
+            <CheckBox IsChecked="{Binding ExclusiveOutputEnabled}" Margin="0,10,0,0">
+                <StackPanel>
+                    <TextBlock Text="独占输出（WASAPI Exclusive）" />
+                    <TextBlock TextWrapping="Wrap" FontSize="11"
+                               Foreground="{StaticResource SecondaryTextBrush}"
+                               Text="绕过系统混音器，用文件原生采样率直推设备。独占期间其他程序发不出声，且相邻曲目采样率不同时那一次切歌不是无缝的。" />
+                </StackPanel>
+            </CheckBox>
+
+            <Border Height="1" Background="{StaticResource SeparatorBrush}" Margin="0,14" />
+
+            <!-- 桌面歌词 -->
+            <TextBlock Text="桌面歌词" FontWeight="SemiBold" Margin="0,0,0,8" />
+
+            <CheckBox IsChecked="{Binding DesktopLyricsEnabled}">
+                <StackPanel>
+                    <TextBlock Text="显示桌面歌词" />
+                    <TextBlock TextWrapping="Wrap" FontSize="11"
+                               Foreground="{StaticResource SecondaryTextBrush}"
+                               Text="浮在所有窗口之上。鼠标移上去出现工具条，可调字号、颜色、锁定。锁定后鼠标穿透，不会挡住桌面。" />
+                </StackPanel>
+            </CheckBox>
+
+            <Border Height="1" Background="{StaticResource SeparatorBrush}" Margin="0,14" />
+
+            <!-- 外观 -->
+            <Grid Margin="0,0,0,6">
+                <TextBlock Text="背景不透明度" FontWeight="SemiBold" />
+                <TextBlock HorizontalAlignment="Right"
+                           Foreground="{StaticResource SecondaryTextBrush}"
+                           Text="{Binding BackgroundOpacity, Converter={StaticResource Percent}}" />
+            </Grid>
+
+            <Slider Minimum="0.2" Maximum="1" Value="{Binding BackgroundOpacity, Mode=TwoWay}" />
+
+            <Grid Margin="0,4,0,0">
+                <TextBlock Text="最低 20%" FontSize="11"
+                           Foreground="{StaticResource TertiaryTextBrush}" />
+                <Button HorizontalAlignment="Right" Style="{StaticResource IconButton}"
+                        FontFamily="Segoe UI" FontSize="11" Padding="6,2"
+                        Content="恢复不透明" Click="OnResetOpacity" />
+            </Grid>
+        </StackPanel>
+    </Border>
+</UserControl>

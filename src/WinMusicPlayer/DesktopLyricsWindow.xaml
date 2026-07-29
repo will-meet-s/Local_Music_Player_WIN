@@ -1,0 +1,81 @@
+<Window x:Class="WinMusicPlayer.DesktopLyricsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="桌面歌词"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        Topmost="True"
+        ShowInTaskbar="False"
+        ResizeMode="NoResize"
+        SizeToContent="Height"
+        Width="900"
+        Focusable="False">
+
+    <!-- 整块可拖动；未锁定时鼠标移入才显示工具条 -->
+    <Grid x:Name="Root"
+          Background="#01000000"
+          MouseEnter="OnMouseEnterRoot"
+          MouseLeave="OnMouseLeaveRoot"
+          MouseLeftButtonDown="OnDragStart">
+
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- 工具条：锁定 / 字号 / 关闭 -->
+        <Border x:Name="Toolbar"
+                Grid.Row="0"
+                Visibility="Collapsed"
+                HorizontalAlignment="Center"
+                Margin="0,0,0,6"
+                Padding="8,4"
+                CornerRadius="6"
+                Background="#CC1E1E22">
+            <StackPanel Orientation="Horizontal">
+                <Button x:Name="LockButton" Click="OnToggleLock"
+                        Style="{StaticResource LyricsToolButton}"
+                        Content="&#xE72E;" ToolTip="锁定（锁定后鼠标穿透，不再挡住桌面）" />
+                <Button Click="OnFontSmaller" Style="{StaticResource LyricsToolButton}"
+                        Content="&#xE738;" ToolTip="缩小字号" />
+                <Button Click="OnFontLarger" Style="{StaticResource LyricsToolButton}"
+                        Content="&#xE710;" ToolTip="放大字号" />
+                <Button Click="OnCycleColor" Style="{StaticResource LyricsToolButton}"
+                        Content="&#xE790;" ToolTip="切换颜色" />
+                <Button Click="OnClose" Style="{StaticResource LyricsToolButton}"
+                        Content="&#xE711;" ToolTip="关闭桌面歌词" />
+            </StackPanel>
+        </Border>
+
+        <StackPanel Grid.Row="1" HorizontalAlignment="Center">
+            <!-- 当前行 -->
+            <TextBlock x:Name="CurrentLine"
+                       Text=""
+                       FontSize="34"
+                       FontWeight="Bold"
+                       TextAlignment="Center"
+                       TextWrapping="Wrap"
+                       Foreground="#FF7DD3FC">
+                <TextBlock.Effect>
+                    <!-- 描边效果：桌面背景明暗不定，没有它在浅色壁纸上会看不清 -->
+                    <DropShadowEffect Color="Black" BlurRadius="8" ShadowDepth="0" Opacity="0.95" />
+                </TextBlock.Effect>
+            </TextBlock>
+
+            <!-- 下一行，暗一些 -->
+            <TextBlock x:Name="NextLine"
+                       Text=""
+                       FontSize="22"
+                       TextAlignment="Center"
+                       TextWrapping="Wrap"
+                       Margin="0,4,0,0"
+                       Opacity="0.65"
+                       Foreground="White">
+                <TextBlock.Effect>
+                    <DropShadowEffect Color="Black" BlurRadius="6" ShadowDepth="0" Opacity="0.9" />
+                </TextBlock.Effect>
+            </TextBlock>
+        </StackPanel>
+    </Grid>
+</Window>

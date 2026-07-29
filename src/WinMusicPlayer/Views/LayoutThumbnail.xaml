@@ -1,0 +1,40 @@
+<UserControl x:Class="WinMusicPlayer.Views.LayoutThumbnail"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- 用色块画出当前布局的示意图，点一下换下一种模式。
+         做成小控件而不是让整块区域响应点击，是为了不和歌词行的「点击跳播」抢手势。 -->
+    <Button Style="{StaticResource IconButton}" Padding="6"
+            Click="OnClick"
+            ToolTip="{Binding LayoutName, StringFormat=当前：{0}，点击切换}">
+        <Border Width="30" Height="26" Background="Transparent">
+            <Grid>
+                <!-- 封面 + 歌词 -->
+                <StackPanel x:Name="GlyphBoth" VerticalAlignment="Center">
+                    <Rectangle Width="11" Height="11" RadiusX="2" RadiusY="2"
+                               Fill="#B8FFFFFF" HorizontalAlignment="Center" />
+                    <Rectangle Width="26" Height="2" RadiusX="1" RadiusY="1"
+                               Fill="#70FFFFFF" Margin="0,3,0,0" HorizontalAlignment="Center" />
+                    <Rectangle Width="19" Height="2" RadiusX="1" RadiusY="1"
+                               Fill="#70FFFFFF" Margin="0,3,0,0" HorizontalAlignment="Center" />
+                </StackPanel>
+
+                <!-- 只看封面 -->
+                <Rectangle x:Name="GlyphArtwork" Visibility="Collapsed"
+                           RadiusX="3" RadiusY="3" Fill="#B8FFFFFF" />
+
+                <!-- 只看歌词 -->
+                <StackPanel x:Name="GlyphLyrics" Visibility="Collapsed" VerticalAlignment="Center">
+                    <Rectangle Width="26" Height="2" RadiusX="1" RadiusY="1"
+                               Fill="#70FFFFFF" HorizontalAlignment="Center" />
+                    <Rectangle Width="20" Height="2" RadiusX="1" RadiusY="1"
+                               Fill="#70FFFFFF" Margin="0,4,0,0" HorizontalAlignment="Center" />
+                    <Rectangle Width="24" Height="2" RadiusX="1" RadiusY="1"
+                               Fill="#70FFFFFF" Margin="0,4,0,0" HorizontalAlignment="Center" />
+                    <Rectangle Width="16" Height="2" RadiusX="1" RadiusY="1"
+                               Fill="#70FFFFFF" Margin="0,4,0,0" HorizontalAlignment="Center" />
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Button>
+</UserControl>
