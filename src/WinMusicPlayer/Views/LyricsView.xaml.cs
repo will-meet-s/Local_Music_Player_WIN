@@ -69,8 +69,50 @@ public partial class LyricsView : UserControl
             text.FontSize = isCurrent ? 15 : 13;
         }
 
-        if (current >= 0 && current < LyricList.Items.Count)
-            LyricList.ScrollIntoView(LyricList.Items[current]);
+        CenterOn(current);
+    }
+
+    /// <summary>
+    /// 把指定行滚到视口正中。
+    /// <para>
+    /// 不能用 <c>ScrollIntoView</c>：它的语义是「让该项可见」—— 已可见就不动、
+    /// 不可见就最小幅度滚入，于是当前行总贴在视口下沿。这里自己算偏移。
+    /// 前提是 ListBox 走像素滚动（见 XAML 的 ScrollUnit="Pixel"），
+    /// 否则 VerticalOffset 的单位是「项」，算出来的像素值毫无意义。
+    /// </para>
+    /// </summary>
+    private void CenterOn(int index, bool retry = true)
+    {
+        if (index < 0 || index >= LyricList.Items.Count) return;
+        if (FindChild<ScrollViewer>(LyricList) is not { } viewer) return;
+
+        // 容器还没实现化时拿不到位置：先粗滚过去，下一帧再精确居中（只重试一次，避免打转）
+        if (LyricList.ItemContainerGenerator.ContainerFromIndex(index) is not FrameworkElement container)
+        {
+            if (!retry) return;
+            LyricList.ScrollIntoView(LyricList.Items[index]);
+            Dispatcher.BeginInvoke(() => CenterOn(index, retry: false),
+                System.Windows.Threading.DispatcherPriority.Loaded);
+            return;
+        }
+
+        var top = container.TransformToAncestor(viewer).Transform(new Point(0, 0)).Y;
+        var target = viewer.VerticalOffset + top - (viewer.ViewportHeight - container.ActualHeight) / 2;
+
+        viewer.ScrollToVerticalOffset(Math.Max(0, target));
+    }
+
+    private static T? FindChild<T>(DependencyObject root) where T : DependencyObject
+    {
+        if (root is T match) return match;
+
+        var count = VisualTreeHelper.GetChildrenCount(root);
+        for (var i = 0; i < count; i++)
+        {
+            var found = FindChild<T>(VisualTreeHelper.GetChild(root, i));
+            if (found is not null) return found;
+        }
+        return null;
     }
 
     private static TextBlock? FindTextBlock(DependencyObject root)

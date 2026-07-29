@@ -19,6 +19,11 @@ public partial class ControlsBar : UserControl
         InitializeComponent();
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
+
+        // handledEventsToo 是关键：Slider / Thumb 的类处理器会先把鼠标按下事件
+        // 标记为 Handled，XAML 里注册的实例处理器因此收不到，单击轨道就没反应。
+        ProgressSlider.AddHandler(PreviewMouseLeftButtonDownEvent,
+            new MouseButtonEventHandler(OnSeekClick), handledEventsToo: true);
     }
 
     private void OnLoaded(object sender, RoutedEventArgs e)
@@ -54,12 +59,23 @@ public partial class ControlsBar : UserControl
     }
 
     /// <summary>
-    /// <c>IsMoveToPointEnabled</c> 让点击轨道就跳位，但那不会触发 Thumb 的拖动事件，
-    /// 所以这里补一次提交，否则单击进度条没有反应。
+    /// 单击轨道跳位。不读 <c>ProgressSlider.Value</c>（那取决于 IsMoveToPointEnabled
+    /// 内部是否已经更新过），而是直接按点击位置换算成时间，行为可预期。
+    /// 落在滑块上的按下交给拖动流程处理。
     /// </summary>
     private void OnSeekClick(object sender, MouseButtonEventArgs e)
     {
-        if (_isSeeking) return;
-        _viewModel?.Seek(ProgressSlider.Value);
+        if (_viewModel is null) return;
+        if (e.OriginalSource is Thumb || _isSeeking) return;
+
+        var width = ProgressSlider.ActualWidth;
+        var span = ProgressSlider.Maximum - ProgressSlider.Minimum;
+        if (width <= 0 || span <= 0) return;
+
+        var ratio = Math.Clamp(e.GetPosition(ProgressSlider).X / width, 0, 1);
+        var target = ProgressSlider.Minimum + ratio * span;
+
+        ProgressSlider.Value = target;
+        _viewModel.Seek(target);
     }
 }

@@ -57,6 +57,10 @@
 
             <Slider Minimum="0.2" Maximum="1" Value="{Binding BackgroundOpacity, Mode=TwoWay}" />
 
+            <TextBlock TextWrapping="Wrap" FontSize="11" Margin="0,4,0,0"
+                       Foreground="{StaticResource TertiaryTextBrush}"
+                       Text="调的是背景色层的浓淡：拉低越透，能看到窗后被模糊的桌面；拉满则是纯色。磨砂材质需要 Windows 11 22H2 及以上，老系统上只有色深变化。" />
+
             <Grid Margin="0,4,0,0">
                 <TextBlock Text="最低 20%" FontSize="11"
                            Foreground="{StaticResource TertiaryTextBrush}" />

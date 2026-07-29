@@ -34,7 +34,11 @@ public sealed class Preferences
     public TrackSortOrder SortOrder { get; set; } = TrackSortOrder.FileOrder;
     public bool SortAscending { get; set; } = true;
     public NowPlayingLayout NowPlayingLayout { get; set; } = NowPlayingLayout.ArtworkAndLyrics;
-    public double BackgroundOpacity { get; set; } = 1.0;
+    /// <summary>
+    /// 背景色层的不透明度。这一层压在 DWM 的亚克力材质之上，取 1.0 就是纯色窗口、
+    /// 材质完全透不出来 —— 默认给 0.55，开箱即能看到磨砂效果；想要纯色仍可拉满。
+    /// </summary>
+    public double BackgroundOpacity { get; set; } = 0.55;
 
     /// <summary>默认开启：有标签就用，没标签的文件本来也不受影响。</summary>
     public bool ReplayGainEnabled { get; set; } = true;

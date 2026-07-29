@@ -8,6 +8,9 @@
                  ItemsSource="{Binding Lyrics}"
                  HorizontalContentAlignment="Stretch"
                  ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                 ScrollViewer.VerticalScrollBarVisibility="Auto"
+                 ScrollViewer.CanContentScroll="True"
+                 VirtualizingPanel.ScrollUnit="Pixel"
                  MouseLeftButtonUp="OnLyricClick">
             <ListBox.Style>
                 <Style TargetType="ListBox">
