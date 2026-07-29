@@ -16,6 +16,16 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- UseWindowsForms 会把 System.Windows.Forms 和 System.Drawing 加进隐式 using，
+         与 WPF 的 System.Windows / System.Windows.Media 大面积同名：Application、
+         UserControl、MouseEventArgs、Color、Brush、Point、Size 都会变成 CS0104。
+         WinForms 只用在 TrayIcon.cs（托盘 NotifyIcon），那个文件自带显式 using，
+         所以这里把隐式项摘掉，其余文件一律按 WPF 解析。 -->
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\MusicCore\MusicCore.csproj" />
   </ItemGroup>
 
