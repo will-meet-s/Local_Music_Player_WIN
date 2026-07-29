@@ -19,7 +19,11 @@ public sealed class Preferences
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
-        Converters = { new JsonStringEnumConverter() }
+        Converters = { new JsonStringEnumConverter() },
+        // DesktopLyricsLeft / Top 用 NaN 表示「还没定过位置」，而 JSON 数字
+        // 规范里没有 NaN，默认设置下 Serialize 会直接抛 ArgumentException。
+        // 这个选项把它写成字符串 "NaN"，Load 用同一份 options 即可原样读回。
+        NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals
     };
 
     private static readonly object SaveGate = new();

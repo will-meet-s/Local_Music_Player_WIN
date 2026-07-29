@@ -27,6 +27,19 @@
             <!-- Windows 自带的图标字体，免去引入图标库 -->
             <FontFamily x:Key="IconFont">Segoe MDL2 Assets</FontFamily>
 
+            <!--
+              正文字体。IconFont 只含私用区图标、没有 CJK 字形，凡是落在
+              IconButton 内部或其 ToolTip 里的中文都会继承到它而渲染成乱码，
+              所以这类文字必须显式指回这里。中文系统上 Segoe UI 会回退到
+              微软雅黑，中英文都能正常显示。
+            -->
+            <FontFamily x:Key="UiFont">Segoe UI</FontFamily>
+
+            <!-- ToolTip 会从宿主控件继承字体，图标按钮上的提示文字因此需要拨回正文字体 -->
+            <Style TargetType="ToolTip">
+                <Setter Property="FontFamily" Value="{StaticResource UiFont}" />
+            </Style>
+
             <Style x:Key="IconButton" TargetType="Button">
                 <Setter Property="FontFamily" Value="{StaticResource IconFont}" />
                 <Setter Property="FontSize" Value="16" />
