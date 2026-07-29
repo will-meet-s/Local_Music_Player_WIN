@@ -111,7 +111,11 @@ public class NaturalStringComparerTests
     [InlineData("a1", "a2", -1)]
     [InlineData("a2", "a10", -1)]
     [InlineData("a10", "a2", 1)]
-    [InlineData("a01", "a1", 0)]      // 前导零不影响数值大小
+    [InlineData("a01", "a2", -1)]     // 前导零不影响数值大小：1 < 2
+    [InlineData("a010", "a9", 1)]     // 同上：10 > 9
+    // 数值相等（"01" == "1"）时不返回 0，而是由序数兜底定序，
+    // 这样比较器保持全序，排序结果确定 —— 见 NaturalStringComparer 末尾
+    [InlineData("a01", "a1", -1)]
     [InlineData("abc", "abc", 0)]
     [InlineData("a", "ab", -1)]
     public void ComparesNaturally(string x, string y, int expectedSign)
