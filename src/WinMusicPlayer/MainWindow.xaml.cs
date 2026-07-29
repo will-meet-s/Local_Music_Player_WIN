@@ -21,7 +21,14 @@ public partial class MainWindow : Window
         _viewModel.FolderPickRequested += PickFolder;
         _viewModel.PropertyChanged += OnViewModelChanged;
 
-        SourceInitialized += (_, _) => WindowBackdrop.TryApplyAcrylic(this);
+        SourceInitialized += (_, _) =>
+        {
+            var applied = WindowBackdrop.TryApplyAcrylic(this);
+            // 成功与否都记一笔：材质没出来时，这行是区分「DWM 拒绝」和
+            // 「被上层不透明元素盖住」的唯一依据
+            CrashLog.WriteNote(applied ? "Backdrop-ok" : "Backdrop-failed",
+                WindowBackdrop.Diagnostics ?? "(无诊断信息)");
+        };
         Loaded += (_, _) => ApplyBackdropOpacity();
         Closed += OnClosed;
     }

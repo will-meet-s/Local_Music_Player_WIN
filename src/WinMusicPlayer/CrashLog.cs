@@ -13,8 +13,14 @@ internal static class CrashLog
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "WinMusicPlayer", "crash.log");
 
+    /// <summary>非异常的诊断信息，同样写进这个文件，排查时只看一处。</summary>
+    public static void WriteNote(string source, string message) => Append(source, message);
+
     /// <summary>记录失败绝不能再抛 —— 否则会盖掉真正的异常。</summary>
-    public static void Write(string source, Exception? ex)
+    public static void Write(string source, Exception? ex) =>
+        Append(source, ex?.ToString() ?? "(异常对象为空)");
+
+    private static void Append(string source, string body)
     {
         try
         {
@@ -23,7 +29,7 @@ internal static class CrashLog
             var text = new StringBuilder()
                 .AppendLine()
                 .AppendLine($"===== {DateTime.Now:yyyy-MM-dd HH:mm:ss} [{source}] =====")
-                .AppendLine(ex?.ToString() ?? "(异常对象为空)")
+                .AppendLine(body)
                 .ToString();
 
             File.AppendAllText(FilePath, text, Encoding.UTF8);
