@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using Microsoft.UI.Xaml;
 using MusicCore.ViewModels;
 using WinMusicPlayer.Interop;
@@ -8,9 +9,15 @@ public partial class App : Application
 {
     private readonly List<Action> _shutdownActions = new();
     private bool _quitting;
+    private DesktopLyricsWindow? _lyricsWindow;
 
     internal static PlayerViewModel ViewModel { get; private set; } = null!;
     internal static MainWindow MainWindow { get; private set; } = null!;
+
+    /// <summary>窗口没开时返回 false，这是基线的行为——托盘菜单在桌面歌词关着时不会读到这个值。</summary>
+    internal bool IsLyricsLocked => _lyricsWindow?.IsLocked ?? false;
+
+    internal void ToggleLyricsLock() => _lyricsWindow?.SetLocked(!IsLyricsLocked);
 
     public App()
     {
@@ -28,13 +35,43 @@ public partial class App : Application
     {
         // 顺序 4
         ViewModel = new PlayerViewModel();
+        ViewModel.PropertyChanged += OnViewModelPropertyChanged;
 
         // 顺序 5
         MainWindow = new MainWindow();
         MainWindow.Activate();
 
+        RegisterShutdown(CloseDesktopLyrics);
+
         // 顺序 6
         ViewModel.RestoreLastSession();
+
+        // 上次退出时开着桌面歌词，这次自动恢复
+        if (ViewModel.DesktopLyricsEnabled) ShowDesktopLyrics();
+    }
+
+    private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(PlayerViewModel.DesktopLyricsEnabled)) return;
+
+        if (ViewModel.DesktopLyricsEnabled) ShowDesktopLyrics();
+        else CloseDesktopLyrics();
+    }
+
+    private void ShowDesktopLyrics()
+    {
+        if (_lyricsWindow is not null) return;
+
+        _lyricsWindow = new DesktopLyricsWindow();
+        _lyricsWindow.Closed += (_, _) => _lyricsWindow = null;
+        _lyricsWindow.ShowWithoutActivation();
+    }
+
+    /// <summary>只关窗口，不改 DesktopLyricsEnabled——下次启动时会自动恢复。</summary>
+    private void CloseDesktopLyrics()
+    {
+        _lyricsWindow?.Close();
+        _lyricsWindow = null;
     }
 
     /// <summary>

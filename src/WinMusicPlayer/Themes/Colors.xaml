@@ -49,4 +49,11 @@
         <Setter Property="Margin" Value="0,0,0,8" />
     </Style>
 
+    <!-- 桌面歌词工具条按钮 -->
+    <Style x:Key="LyricsToolButton" TargetType="Button" BasedOn="{StaticResource IconButton}">
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="Padding" Value="6,3" />
+        <Setter Property="Foreground" Value="White" />
+    </Style>
+
 </ResourceDictionary>

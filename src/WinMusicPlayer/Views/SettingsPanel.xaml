@@ -29,8 +29,19 @@
 
         <Border Height="1" Background="{StaticResource SeparatorBrush}" Margin="0,14" />
 
-        <!-- 桌面歌词，留给 T-008 -->
-        <StackPanel x:Name="DesktopLyricsSection" />
+        <!-- 桌面歌词 -->
+        <StackPanel x:Name="DesktopLyricsSection">
+            <TextBlock Text="桌面歌词" Style="{StaticResource SettingsSectionTitle}" />
+
+            <CheckBox IsChecked="{x:Bind ViewModel.DesktopLyricsEnabled, Mode=TwoWay}">
+                <StackPanel>
+                    <TextBlock Text="显示桌面歌词" />
+                    <TextBlock Text="浮在所有窗口之上。鼠标移上去出现工具条，可调字号、颜色、锁定。锁定后鼠标穿透，不会挡住桌面。"
+                               FontSize="11" TextWrapping="Wrap" MaxWidth="320"
+                               Foreground="{StaticResource SecondaryTextBrush}" />
+                </StackPanel>
+            </CheckBox>
+        </StackPanel>
 
         <Border Height="1" Background="{StaticResource SeparatorBrush}" Margin="0,14" />
 
