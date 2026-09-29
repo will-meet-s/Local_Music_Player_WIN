@@ -3,6 +3,7 @@ using Microsoft.UI.Xaml;
 using MusicCore.ViewModels;
 using WinMusicPlayer.Interop;
 using WinRT.Interop;
+using Windows.Storage.Pickers;
 
 namespace WinMusicPlayer;
 
@@ -10,6 +11,7 @@ public sealed partial class MainWindow : Window
 {
     private bool _sizingInitialized;
     private double _lastRasterizationScale;
+    private bool _picking;
 
     public MainWindow()
     {
@@ -21,6 +23,9 @@ public sealed partial class MainWindow : Window
 
         RootLayer.Loaded += OnRootLoaded;
         AppWindow.Closing += OnAppWindowClosing;
+
+        // 主窗口只创建一次，不需要退订
+        App.ViewModel.FolderPickRequested += PickFolder;
     }
 
     /// <summary>各视图统一通过它拿到唯一的 ViewModel 实例，再用 x:Bind 绑定。</summary>
@@ -56,4 +61,30 @@ public sealed partial class MainWindow : Window
         ((App)Application.Current).Quit();
 
     private void OnDismissError(object sender, RoutedEventArgs e) => ViewModel.ErrorMessage = null;
+
+    private async void PickFolder()
+    {
+        if (_picking) return;          // 防止连点弹出两个选择框
+        _picking = true;
+        try
+        {
+            var picker = new FolderPicker
+            {
+                SuggestedStartLocation = PickerLocationId.MusicLibrary,
+                SettingsIdentifier = "WinMusicPlayer.MusicFolder",
+                CommitButtonText = "选择此文件夹"
+            };
+            picker.FileTypeFilter.Add("*");
+            InitializeWithWindow.Initialize(picker, Hwnd);
+
+            var folder = await picker.PickSingleFolderAsync();
+            if (folder is not null) ViewModel.Scan(folder.Path);   // 点「取消」时返回 null，什么都不做
+        }
+        catch (Exception e)
+        {
+            ViewModel.ErrorMessage = $"无法打开文件夹选择框：{e.Message}";
+            CrashLog.Write("FolderPicker", e);
+        }
+        finally { _picking = false; }
+    }
 }
