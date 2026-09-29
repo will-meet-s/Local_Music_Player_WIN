@@ -74,6 +74,12 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
     /// <summary>扫描得到的全量曲库，保持文件顺序。</summary>
     public IReadOnlyList<Track> Library => _library;
 
+    /// <summary>
+    /// 进程内唯一的 Track 对象登记表，保证同一首歌在曲库、歌单、播放列表里显示一致（T-003）。
+    /// 界面层的歌单 ViewModel 由 <c>MainWindow</c> 创建时注入同一个实例。
+    /// </summary>
+    public TrackCatalog Catalog { get; } = new();
+
     /// <summary>过滤 + 排序后的列表。UI 展示与播放队列都以它为准。</summary>
     public ObservableCollection<Track> Tracks { get; } = new();
 
@@ -506,11 +512,16 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
         {
             var paths = await Task.Run(() => LibraryScanner.Scan(folder));
 
-            // 复用已有条目，避免重扫时把整库的元数据全部重读一遍
+            // 复用已有条目，避免重扫时把整库的元数据全部重读一遍；
+            // 找不到再看 Catalog 里是否已经有（例如 T-003 打开歌单时先创建的对象），
+            // 都没有才新建，登记进 Catalog，保证同一首歌全进程只有一个对象（T-003 v3）
             var known = _library.ToDictionary(t => t.Path, TrackIdentity.Comparer);
             _library = paths
-                .Select(p => known.TryGetValue(p, out var existing) ? existing : new Track(p))
+                .Select(p => known.TryGetValue(p, out var existing) ? existing
+                    : Catalog.TryGet(p, out var fromCatalog) ? fromCatalog
+                    : new Track(p))
                 .ToList();
+            Catalog.RegisterLibrary(_library);
 
             Raise(nameof(Library));
             Raise(nameof(LibraryCount));
