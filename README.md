@@ -181,4 +181,3 @@ tests/MusicCore.Tests/          LrcParser / PlaybackQueue / TrackFilter / Replay
 - WAV 没有标准歌词标签，只能靠同名 `.lrc`
 - 未做代码签名，SmartScreen 首次运行会提示「未知发布者」，点「仍要运行」即可
 - Windows 10 默认没有 Segoe Fluent Icons 字体，播放 / 暂停按钮的图标会显示为空白（基线的 WPF 版也是这样）
-- 多块显示器的缩放比例不同时，桌面歌词恢复后的位置可能有少许偏移

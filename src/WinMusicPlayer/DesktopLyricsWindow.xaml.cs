@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
+using Microsoft.UI;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Input;
@@ -42,6 +43,11 @@ public sealed partial class DesktopLyricsWindow : Window
 
     [DllImport("user32.dll", EntryPoint = "SendMessageW")]
     private static extern IntPtr SendMessage(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam);
+
+    private const uint MdtEffectiveDpi = 0;
+
+    [DllImport("shcore.dll")]
+    private static extern int GetDpiForMonitor(IntPtr hmonitor, uint dpiType, out uint dpiX, out uint dpiY);
 
     private readonly Preferences _settings;
     private readonly IntPtr _hwnd;
@@ -124,40 +130,91 @@ public sealed partial class DesktopLyricsWindow : Window
 
     private static int ToPx(double dip, double scale) => (int)Math.Round(dip * scale);
 
-    /// <summary>恢复上次的位置。没有记录时贴在主屏底部居中——桌面歌词的惯常位置。</summary>
+    /// <summary>
+    /// 恢复上次的位置。没有记录时贴在主屏底部居中——桌面歌词的惯常位置。
+    /// <para>
+    /// 位置是按「保存时浮层所在那块显示器」的缩放比例换算成逻辑像素存的（<see cref="PersistGeometry"/>），
+    /// 所以恢复时不能用刚创建时的 <see cref="GetDpiScale"/>（那时浮层还在主屏上，取到的是主屏的比例）。
+    /// 改成逐块显示器试算：用每块显示器的缩放比例把逻辑坐标换回物理坐标，看是否落在那块显示器自己的
+    /// 范围里——只有当初保存时用的那块显示器，换算结果才会落在它自己范围内。
+    /// </para>
+    /// </summary>
     private void RestoreGeometry()
     {
-        var scale = GetDpiScale();
         var widthDip = Math.Max(320, _settings.DesktopLyricsWidth);
 
-        var area = DisplayArea.Primary.WorkArea;   // 物理像素
+        if (double.IsNaN(_settings.DesktopLyricsLeft) || double.IsNaN(_settings.DesktopLyricsTop))
+        {
+            PlaceOnPrimaryDisplay(widthDip);
+            return;
+        }
+
+        var leftDip = _settings.DesktopLyricsLeft;
+        var topDip = _settings.DesktopLyricsTop;
+
+        foreach (var display in DisplayArea.FindAll())
+        {
+            var scale = GetDisplayScale(display);
+            var x = ToPx(leftDip, scale);
+            var y = ToPx(topDip, scale);
+            var bounds = display.OuterBounds;   // 这块显示器在虚拟桌面里的物理像素范围
+
+            if (x >= bounds.X && x < bounds.X + bounds.Width && y >= bounds.Y && y < bounds.Y + bounds.Height)
+            {
+                ApplyGeometryOnDisplay(display, scale, leftDip, topDip, widthDip);
+                return;
+            }
+        }
+
+        // 没有任何一块显示器命中（上次用的那块屏已经拔掉了）：退回主屏，水平居中
+        PlaceOnPrimaryDisplay(widthDip);
+    }
+
+    private void PlaceOnPrimaryDisplay(double widthDip)
+    {
+        var primary = DisplayArea.Primary;
+        var scale = GetDisplayScale(primary);
+        var area = primary.WorkArea;   // 物理像素
         var areaLeftDip = area.X / scale;
         var areaTopDip = area.Y / scale;
         var areaWidthDip = area.Width / scale;
         var areaHeightDip = area.Height / scale;
 
-        double leftDip, topDip;
+        var leftDip = areaLeftDip + (areaWidthDip - widthDip) / 2;
+        var topDip = areaTopDip + areaHeightDip - 180;
 
-        if (double.IsNaN(_settings.DesktopLyricsLeft) || double.IsNaN(_settings.DesktopLyricsTop))
-        {
+        MoveAndResizeDip(leftDip, topDip, widthDip, scale);
+    }
+
+    private void ApplyGeometryOnDisplay(DisplayArea display, double scale, double leftDip, double topDip, double widthDip)
+    {
+        var area = display.WorkArea;   // 物理像素
+        var areaLeftDip = area.X / scale;
+        var areaTopDip = area.Y / scale;
+        var areaWidthDip = area.Width / scale;
+        var areaHeightDip = area.Height / scale;
+
+        // 显示器还在，但窗口可能因为分辨率变化跑出了工作区，做和 v1 一样的越界修正
+        if (leftDip < areaLeftDip - widthDip + 100 || leftDip > areaLeftDip + areaWidthDip - 100)
             leftDip = areaLeftDip + (areaWidthDip - widthDip) / 2;
+        if (topDip < areaTopDip || topDip > areaTopDip + areaHeightDip - 60)
             topDip = areaTopDip + areaHeightDip - 180;
-        }
-        else
-        {
-            leftDip = _settings.DesktopLyricsLeft;
-            topDip = _settings.DesktopLyricsTop;
 
-            // 上次用的显示器可能已经拔掉了，拉回可见区域，别让窗口消失在屏幕外
-            if (leftDip < areaLeftDip - widthDip + 100 || leftDip > areaLeftDip + areaWidthDip - 100)
-                leftDip = areaLeftDip + (areaWidthDip - widthDip) / 2;
-            if (topDip < areaTopDip || topDip > areaTopDip + areaHeightDip - 60)
-                topDip = areaTopDip + areaHeightDip - 180;
-        }
+        MoveAndResizeDip(leftDip, topDip, widthDip, scale);
+    }
 
+    private void MoveAndResizeDip(double leftDip, double topDip, double widthDip, double scale)
+    {
         // 高度先给个占位值，UpdateText 末尾的 FitHeight 会立刻纠正
         AppWindow.MoveAndResize(new RectInt32(
             ToPx(leftDip, scale), ToPx(topDip, scale), ToPx(widthDip, scale), ToPx(300, scale)));
+    }
+
+    private static double GetDisplayScale(DisplayArea display)
+    {
+        var hmon = Win32Interop.GetMonitorFromDisplayId(display.DisplayId);
+        GetDpiForMonitor(hmon, MdtEffectiveDpi, out var dpiX, out _);
+        return dpiX / 96.0;
     }
 
     /// <summary>把窗口高度调整到刚好容纳内容，相当于 WPF 的 SizeToContent="Height"。</summary>
