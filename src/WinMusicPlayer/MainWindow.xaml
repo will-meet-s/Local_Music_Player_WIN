@@ -120,7 +120,9 @@
                 <Border Grid.Column="1" Width="1" Background="{StaticResource SeparatorBrush}" />
 
                 <!-- T-005：歌词与正在播放 -->
-                <Grid x:Name="NowPlayingHost" Grid.Column="2" />
+                <Grid x:Name="NowPlayingHost" Grid.Column="2">
+                    <views:NowPlayingView />
+                </Grid>
             </Grid>
 
             <Border Grid.Row="4" Height="1" Background="{StaticResource SeparatorBrush}" />

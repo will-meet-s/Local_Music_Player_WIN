@@ -1,0 +1,25 @@
+<UserControl
+    x:Class="WinMusicPlayer.Views.LyricsView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <Grid>
+        <ScrollViewer x:Name="LyricsScroller"
+                      HorizontalScrollBarVisibility="Disabled"
+                      VerticalScrollBarVisibility="Auto">
+            <StackPanel x:Name="LyricsPanel" />
+        </ScrollViewer>
+
+        <StackPanel x:Name="LyricsEmpty" HorizontalAlignment="Center" VerticalAlignment="Center">
+            <TextBlock FontFamily="{StaticResource IconFont}" Text="&#xE8D2;"
+                       FontSize="26" Foreground="{StaticResource TertiaryTextBrush}"
+                       HorizontalAlignment="Center" />
+            <TextBlock Text="暂无歌词" Margin="0,8,0,0"
+                       Foreground="{StaticResource SecondaryTextBrush}"
+                       HorizontalAlignment="Center" />
+            <TextBlock Text="把同名 .lrc 文件放在音频旁边即可显示" Margin="0,4,0,0"
+                       FontSize="11" Foreground="{StaticResource TertiaryTextBrush}"
+                       TextAlignment="Center" HorizontalAlignment="Center" />
+        </StackPanel>
+    </Grid>
+</UserControl>
