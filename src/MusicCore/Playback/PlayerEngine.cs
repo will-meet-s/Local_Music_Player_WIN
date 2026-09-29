@@ -34,6 +34,12 @@ public sealed class PlayerEngine : IDisposable
     private bool _hasPreloaded;
     private double _lastReportedPosition = -1;
 
+    /// <summary>
+    /// 输出设备工厂，供单元测试注入假设备。生产环境不设置时使用真实 <see cref="WasapiOut"/>。
+    /// </summary>
+    internal Func<AudioClientShareMode, int, IWavePlayer> OutputFactory { get; set; } =
+        (mode, latency) => new WasapiOut(mode, latency);
+
     public PlayerEngine()
     {
         // 捕获创建时的同步上下文，音频线程上的事件靠它切回 UI 线程
@@ -246,7 +252,7 @@ public sealed class PlayerEngine : IDisposable
 
         var volumeStage = new VolumeSampleProvider(pipeline) { Volume = _volume };
 
-        var output = new WasapiOut(
+        var output = OutputFactory(
             ExclusiveMode ? AudioClientShareMode.Exclusive : AudioClientShareMode.Shared,
             ExclusiveMode ? 50 : 120);
 
