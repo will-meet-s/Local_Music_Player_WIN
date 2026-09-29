@@ -1,8 +1,8 @@
 using System.Runtime.InteropServices;
+using Microsoft.UI.Composition;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media;
 using Windows.System;
-using Windows.UI.Composition;
 
 namespace WinMusicPlayer.Interop;
 
@@ -12,7 +12,10 @@ namespace WinMusicPlayer.Interop;
 /// </summary>
 internal sealed class TransparentBackdrop : SystemBackdrop
 {
-    private static Compositor? s_compositor;
+    // ICompositionSupportsSystemBackdrop 在 Microsoft.UI.Composition 里；它的 SystemBackdrop
+    // 属性类型却是 Windows.UI.Composition 下的 CompositionBrush。两个命名空间都有 Compositor，
+    // 同时 using 会产生歧义，所以这里只 using 前者，Windows.UI.Composition.Compositor 写全名。
+    private static Windows.UI.Composition.Compositor? s_compositor;
 
     /// <summary>必须一直持有引用，被回收的话系统的 DispatcherQueue 就没了。</summary>
     private static object? s_queueController;
@@ -24,7 +27,7 @@ internal sealed class TransparentBackdrop : SystemBackdrop
         try
         {
             EnsureSystemDispatcherQueue();
-            s_compositor ??= new Compositor();
+            s_compositor ??= new Windows.UI.Composition.Compositor();
             target.SystemBackdrop = s_compositor.CreateColorBrush(Windows.UI.Color.FromArgb(0, 0, 0, 0));
         }
         catch (Exception ex)

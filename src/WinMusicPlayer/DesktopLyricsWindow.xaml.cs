@@ -242,6 +242,7 @@ public sealed partial class DesktopLyricsWindow : Window
         // 锁定时把工具条藏死；解锁靠托盘菜单，因为穿透后这里点不到
         LockButton.Content = locked ? "\uE72E" : "\uE785";
         if (locked) Toolbar.Visibility = Visibility.Collapsed;
+        FitHeight();
     }
 
     private void AdjustFont(double delta)
@@ -267,10 +268,14 @@ public sealed partial class DesktopLyricsWindow : Window
     private void OnRootPointerEntered(object sender, PointerRoutedEventArgs e)
     {
         if (!_settings.DesktopLyricsLocked) Toolbar.Visibility = Visibility.Visible;
+        FitHeight();
     }
 
-    private void OnRootPointerExited(object sender, PointerRoutedEventArgs e) =>
+    private void OnRootPointerExited(object sender, PointerRoutedEventArgs e)
+    {
         Toolbar.Visibility = Visibility.Collapsed;
+        FitHeight();
+    }
 
     private void OnRootPointerPressed(object sender, PointerRoutedEventArgs e)
     {
