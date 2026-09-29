@@ -10,16 +10,24 @@ internal readonly record struct FileStamp(DateTime LastWriteTimeUtc, long Length
 internal sealed class SonglistLoadResult
 {
     public SonglistLoadResult(IReadOnlyDictionary<Guid, Songlist> loaded, IReadOnlyDictionary<Guid, FileStamp> stamps,
-        IReadOnlyList<LoadFailure> failures)
+        IReadOnlyList<LoadFailure> failures, IReadOnlyList<string> diagnosticLines)
     {
         Loaded = loaded;
         Stamps = stamps;
         Failures = failures;
+        DiagnosticLines = diagnosticLines;
     }
 
     public IReadOnlyDictionary<Guid, Songlist> Loaded { get; }
     public IReadOnlyDictionary<Guid, FileStamp> Stamps { get; }
     public IReadOnlyList<LoadFailure> Failures { get; }
+
+    /// <summary>
+    /// 完整的日志行（含文件名、异常类型、HResult），供 <see cref="SonglistService"/> 写 Diagnostic。
+    /// 和 <see cref="Failures"/> 分开，是因为 <see cref="LoadFailure.Reason"/> 是公开契约，
+    /// 只放异常类型名（§5 日志脱敏），HResult 这类调试信息不放在里面。
+    /// </summary>
+    public IReadOnlyList<string> DiagnosticLines { get; }
 }
 
 /// <summary>
@@ -38,11 +46,12 @@ internal sealed class SonglistStore
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
     };
 
-    public SonglistStore(string rootDirectory)
-    {
-        RootDirectory = rootDirectory;
-        Directory.CreateDirectory(rootDirectory);
-    }
+    /// <summary>
+    /// 构造函数不做任何 IO（R-2）：数据目录不可写时，不应该在这里就让整个服务构造失败、
+    /// 程序启动崩溃。目录在真正需要读写时（<see cref="LoadAll"/>、<see cref="AcquireLock"/>）才创建，
+    /// 失败时按各自的方式兜底，不抛到调用方。
+    /// </summary>
+    public SonglistStore(string rootDirectory) => RootDirectory = rootDirectory;
 
     public string RootDirectory { get; }
 
@@ -57,32 +66,56 @@ internal sealed class SonglistStore
         return new FileStamp(info.LastWriteTimeUtc, info.Length);
     }
 
-    /// <summary>枚举全部 *.json 并逐个解析；顺带清理上次异常退出残留的临时文件（§4.1）。</summary>
-    public SonglistLoadResult LoadAll()
+    /// <summary>
+    /// 枚举全部 *.json 并逐个解析。<paramref name="cleanupTemp"/> 只有在调用方确实拿到了
+    /// 跨进程锁时才应该传 true——不加锁时清理 *.json.tmp-* 可能删掉另一个窗口正在写的临时文件（R-4）。
+    /// <para>
+    /// 目录本身不存在、不可读，或者被同名文件占用，都不抛异常：返回空结果加一条 <c>FileName = "songlists"</c>
+    /// 的失败记录，程序照常启动（R-2，§4 可靠性）。首次上线、目录还不存在时，这里顺便把它建出来（§3.3）。
+    /// </para>
+    /// </summary>
+    public SonglistLoadResult LoadAll(bool cleanupTemp)
     {
-        CleanupTempFiles();
-
-        var loaded = new Dictionary<Guid, Songlist>();
-        var stamps = new Dictionary<Guid, FileStamp>();
-        var failures = new List<LoadFailure>();
-
-        foreach (var path in Directory.EnumerateFiles(RootDirectory, "*.json"))
+        try
         {
-            var fileName = Path.GetFileNameWithoutExtension(path);
-            try
-            {
-                var songlist = LoadOne(path, fileName);
-                loaded[songlist.Id] = songlist;
-                var info = new FileInfo(path);
-                stamps[songlist.Id] = new FileStamp(info.LastWriteTimeUtc, info.Length);
-            }
-            catch (Exception e) when (IsReadFailure(e))
-            {
-                failures.Add(new LoadFailure(Path.GetFileName(path), e.Message));
-            }
-        }
+            Directory.CreateDirectory(RootDirectory);
+            if (cleanupTemp) CleanupTempFiles();
 
-        return new SonglistLoadResult(loaded, stamps, failures);
+            var loaded = new Dictionary<Guid, Songlist>();
+            var stamps = new Dictionary<Guid, FileStamp>();
+            var failures = new List<LoadFailure>();
+            var diagnosticLines = new List<string>();
+
+            foreach (var path in Directory.EnumerateFiles(RootDirectory, "*.json"))
+            {
+                var fileName = Path.GetFileNameWithoutExtension(path);
+                try
+                {
+                    var songlist = LoadOne(path, fileName);
+                    loaded[songlist.Id] = songlist;
+                    var info = new FileInfo(path);
+                    stamps[songlist.Id] = new FileStamp(info.LastWriteTimeUtc, info.Length);
+                }
+                catch (Exception e) when (IsReadFailure(e))
+                {
+                    // InvalidDataException 是我们自己抛的、内容可控（不含路径），可以原样保留；
+                    // IOException / UnauthorizedAccessException / JsonException 的 Message 可能带完整路径，只留类型名（R-5）
+                    var reason = e is InvalidDataException ? e.Message : e.GetType().Name;
+                    failures.Add(new LoadFailure(Path.GetFileName(path), reason));
+                    diagnosticLines.Add($"{Path.GetFileName(path)} {e.GetType().Name} 0x{e.HResult:X8}");
+                }
+            }
+
+            return new SonglistLoadResult(loaded, stamps, failures, diagnosticLines);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return new SonglistLoadResult(
+                new Dictionary<Guid, Songlist>(),
+                new Dictionary<Guid, FileStamp>(),
+                new[] { new LoadFailure("songlists", e.GetType().Name) },
+                new[] { $"songlists {e.GetType().Name} 0x{e.HResult:X8}" });
+        }
     }
 
     /// <summary>解析单个歌单文件。<paramref name="fileNameWithoutExtension"/> 用来校验 id 与文件名一致。</summary>
@@ -102,6 +135,7 @@ internal sealed class SonglistStore
     /// </summary>
     public void Save(Songlist songlist)
     {
+        Directory.CreateDirectory(RootDirectory);
         var path = GetPath(songlist.Id);
         var tmpPath = $"{path}.tmp-{Environment.ProcessId}";
         var json = Serialize(songlist);
@@ -149,6 +183,7 @@ internal sealed class SonglistStore
     /// <summary>每 50 毫秒重试一次，最多等 <paramref name="timeout"/>；超时抛 <see cref="TimeoutException"/>（§4.3）。</summary>
     public IDisposable AcquireLock(TimeSpan timeout)
     {
+        Directory.CreateDirectory(RootDirectory);
         var lockPath = Path.Combine(RootDirectory, LockFileName);
         var deadline = DateTime.UtcNow + timeout;
 

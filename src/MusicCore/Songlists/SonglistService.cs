@@ -26,38 +26,52 @@ public sealed class SonglistService
     /// <summary>内容、状态变化时触发；必须在 UI 线程上（由调用方——UI 线程发起的 await 恢复——保证）。</summary>
     public event Action<SonglistChange>? Changed;
 
-    /// <summary>启动时调用：加载全部歌单文件，不阻塞其他任何流程（§4.1）。</summary>
+    /// <summary>
+    /// 启动时调用：加载全部歌单文件，不阻塞其他任何流程（§4.1）。
+    /// 从头到尾都在 <see cref="_gate"/> 之内执行，和 <see cref="ExecuteAsync"/> 串行（R-3）——
+    /// 否则一次改动类操作正在后台线程上复制 <see cref="_songlists"/> 时，这里的 <c>Clear</c>
+    /// 可能让那份复制抛「集合已修改」异常，或者复制出半份数据。
+    /// </summary>
     public async Task<SonglistLoadReport> LoadAllAsync()
     {
-        var result = await Task.Run(() =>
+        await _gate.WaitAsync();
+        try
         {
-            IDisposable? fileLock = null;
-            try
+            var result = await Task.Run(() =>
             {
-                fileLock = _store.AcquireLock(TimeSpan.FromSeconds(2));
-            }
-            catch (TimeoutException)
-            {
-                // 超时就不加锁直接读，只读不写
-            }
+                IDisposable? fileLock = null;
+                try
+                {
+                    fileLock = _store.AcquireLock(TimeSpan.FromSeconds(2));
+                }
+                catch (Exception e) when (e is TimeoutException or IOException or UnauthorizedAccessException)
+                {
+                    // 拿不到锁（超时，或者目录都建不出来）就不加锁直接读，只读不写；
+                    // LoadAll 自己会兜住目录访问失败的情况，不会往外抛（R-2）
+                }
 
-            using (fileLock)
-            {
-                return _store.LoadAll();
-            }
-        });
+                using (fileLock)
+                {
+                    return _store.LoadAll(cleanupTemp: fileLock is not null);
+                }
+            });
 
-        _songlists.Clear();
-        _stamps.Clear();
-        foreach (var (id, songlist) in result.Loaded) _songlists[id] = songlist;
-        foreach (var (id, stamp) in result.Stamps) _stamps[id] = stamp;
+            _songlists.Clear();
+            _stamps.Clear();
+            foreach (var (id, songlist) in result.Loaded) _songlists[id] = songlist;
+            foreach (var (id, stamp) in result.Stamps) _stamps[id] = stamp;
 
-        foreach (var failure in result.Failures)
-            Diagnostic?.Invoke("Songlist", $"[Songlist] Load {failure.FileName} 读取失败：{failure.Reason}");
+            foreach (var line in result.DiagnosticLines)
+                Diagnostic?.Invoke("Songlist", $"[Songlist] Load {line}");
 
-        Changed?.Invoke(new SonglistChange(SonglistChangeKind.Reloaded, null));
+            Changed?.Invoke(new SonglistChange(SonglistChangeKind.Reloaded, null));
 
-        return new SonglistLoadReport(result.Loaded.Count, result.Failures);
+            return new SonglistLoadReport(result.Loaded.Count, result.Failures);
+        }
+        finally
+        {
+            _gate.Release();
+        }
     }
 
     /// <summary>按 <c>CreatedAt</c> 升序，时间相同时按 <c>Id</c> 升序。</summary>
@@ -142,22 +156,18 @@ public sealed class SonglistService
         bool Ok, Songlist? Applied, SonglistErrorCode? Error,
         Dictionary<Guid, Songlist>? Fresh, Dictionary<Guid, FileStamp>? Stamps);
 
-    /// <summary>在后台线程上执行：拿锁、在本地快照上同步磁盘最新状态、应用操作、写盘或删除。</summary>
+    /// <summary>
+    /// 在后台线程上执行：拿锁、在本地快照上同步磁盘最新状态、应用操作、写盘或删除。
+    /// 拿锁、同步、写盘任何一步遇到的 <see cref="IOException"/> / <see cref="UnauthorizedAccessException"/>
+    /// 都统一按 <see cref="SonglistErrorCode.SaveFailed"/> 处理，不让它们跑出 <see cref="ExecuteAsync"/>
+    /// 让调用方（界面层多是 fire-and-forget）直接崩溃（R-1）。
+    /// </summary>
     private DiskOutcome ExecuteOnDisk(ISonglistOperation op)
     {
-        IDisposable fileLock;
         try
         {
-            fileLock = _store.AcquireLock(TimeSpan.FromSeconds(2));
-        }
-        catch (TimeoutException)
-        {
-            Diagnostic?.Invoke("Songlist", $"[Songlist] Save {op.TargetId} TimeoutException 0x00000000");
-            return new DiskOutcome(false, null, SonglistErrorCode.SaveFailed, null, null);
-        }
+            using var fileLock = _store.AcquireLock(TimeSpan.FromSeconds(2));
 
-        using (fileLock)
-        {
             var (fresh, stamps, corruptedNow) = SyncFromDisk();
 
             Songlist? applied;
@@ -174,30 +184,32 @@ public sealed class SonglistService
                 return new DiskOutcome(false, null, e.Code, null, null);
             }
 
-            try
+            if (applied is null)
             {
-                if (applied is null)
-                {
-                    _store.Delete(op.TargetId!.Value);
-                    fresh.Remove(op.TargetId.Value);
-                    stamps.Remove(op.TargetId.Value);
-                }
-                else
-                {
-                    var toSave = applied with { Revision = applied.Revision + 1 };
-                    _store.Save(toSave);
-                    fresh[toSave.Id] = toSave;
-                    stamps[toSave.Id] = _store.Stat(toSave.Id);
-                    applied = toSave;
-                }
+                _store.Delete(op.TargetId!.Value);
+                fresh.Remove(op.TargetId.Value);
+                stamps.Remove(op.TargetId.Value);
             }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            else
             {
-                Diagnostic?.Invoke("Songlist", $"[Songlist] Save {op.TargetId} {e.GetType().Name} 0x{e.HResult:X8}");
-                return new DiskOutcome(false, null, SonglistErrorCode.SaveFailed, null, null);
+                var toSave = applied with { Revision = applied.Revision + 1 };
+                _store.Save(toSave);
+                fresh[toSave.Id] = toSave;
+                stamps[toSave.Id] = _store.Stat(toSave.Id);
+                applied = toSave;
             }
 
             return new DiskOutcome(true, applied, null, fresh, stamps);
+        }
+        catch (TimeoutException)
+        {
+            Diagnostic?.Invoke("Songlist", $"[Songlist] Save {op.TargetId} TimeoutException 0x00000000");
+            return new DiskOutcome(false, null, SonglistErrorCode.SaveFailed, null, null);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            Diagnostic?.Invoke("Songlist", $"[Songlist] Save {op.TargetId} {e.GetType().Name} 0x{e.HResult:X8}");
+            return new DiskOutcome(false, null, SonglistErrorCode.SaveFailed, null, null);
         }
     }
 

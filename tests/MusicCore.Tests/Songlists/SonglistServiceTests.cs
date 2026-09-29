@@ -334,4 +334,75 @@ public sealed class SonglistServiceTests : IDisposable
     }
 
     // 10 见 SonglistStoreTests（直接测 SonglistStore.DeleteRaw 的目录越界断言）
+
+    // R-1：拿锁这一步遇到非「共享冲突」的 IO 异常，也要按 SaveFailed 处理，不能直接抛出去
+
+    [Fact]
+    public async Task RenameAsync_LockFileReadOnly_ReturnsSaveFailedInsteadOfThrowing()
+    {
+        var service = NewService();
+        await service.LoadAllAsync();
+        var created = await service.CreateAsync("锁文件只读测试");
+        var id = created.Value!.Id;
+
+        var lockPath = Path.Combine(_dir, ".lock");
+        File.WriteAllText(lockPath, "");
+        File.SetAttributes(lockPath, FileAttributes.ReadOnly);
+        try
+        {
+            var result = await service.RenameAsync(id, "改名");
+
+            Assert.False(result.Success);
+            Assert.Equal(SonglistErrorCode.SaveFailed, result.Error);
+        }
+        finally
+        {
+            File.SetAttributes(lockPath, FileAttributes.Normal);
+        }
+    }
+
+    // R-2：数据目录被同名文件占用（CreateDirectory、EnumerateFiles 都会失败）时，构造和 LoadAllAsync 都不能抛异常
+
+    [Fact]
+    public async Task Construction_And_LoadAllAsync_RootPathBlockedByExistingFile_DoesNotThrow()
+    {
+        File.WriteAllText(_dir, "这个路径被一个文件占用了，不是目录");
+        try
+        {
+            SonglistService? service = null;
+            var ctorException = Record.Exception(() => service = new SonglistService(_dir));
+            Assert.Null(ctorException);
+
+            SonglistLoadReport? report = null;
+            var loadException = await Record.ExceptionAsync(async () => report = await service!.LoadAllAsync());
+            Assert.Null(loadException);
+
+            Assert.NotNull(report);
+            Assert.Equal(0, report!.Loaded);
+            var failure = Assert.Single(report.Failed);
+            Assert.Equal("songlists", failure.FileName);
+        }
+        finally
+        {
+            File.Delete(_dir);
+        }
+    }
+
+    // R-4：只有真正拿到锁时才清理残留的临时文件；拿不到锁（这里用被占用的 .lock 模拟）就不能清
+
+    [Fact]
+    public async Task LoadAllAsync_LockHeldByAnotherProcess_DoesNotCleanUpStrayTempFile()
+    {
+        Directory.CreateDirectory(_dir);
+        var strayTmp = Path.Combine(_dir, $"{Guid.NewGuid():N}.json.tmp-999");
+        File.WriteAllText(strayTmp, "残留的临时文件");
+
+        var lockPath = Path.Combine(_dir, ".lock");
+        using var heldLock = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+
+        var service = NewService();
+        await service.LoadAllAsync();
+
+        Assert.True(File.Exists(strayTmp));
+    }
 }
