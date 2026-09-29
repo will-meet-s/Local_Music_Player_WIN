@@ -115,7 +115,7 @@ public class TrackIdentityTests
             @"D:\测试 曲库\P\p02.mp3"
         };
 
-        Assert.Equal(1, set.Count);
+        Assert.Single(set);
     }
 
     [Fact]

@@ -44,7 +44,7 @@ public class NowPlayingListTests
     {
         var list = new NowPlayingList(PlayMode.Sequential);
         var events = new List<NotifyCollectionChangedEventArgs>();
-        list.Items.CollectionChanged += (_, e) => events.Add(e);
+        ((INotifyCollectionChanged)list.Items).CollectionChanged += (_, e) => events.Add(e);
 
         list.PlayFromLibrary(MakeTracks(3), 0);
 
@@ -131,7 +131,7 @@ public class NowPlayingListTests
         list.PlayFromLibrary(MakeTracks(3), 0);
 
         var events = new List<NotifyCollectionChangedEventArgs>();
-        list.Items.CollectionChanged += (_, e) => events.Add(e);
+        ((INotifyCollectionChanged)list.Items).CollectionChanged += (_, e) => events.Add(e);
 
         list.SyncFromLibrary(MakeTracks(4), playing: null, previousIndex: -1);
 
