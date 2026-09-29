@@ -438,13 +438,16 @@ public class PlaybackQueueTests
         q.ApplyEdit(map, newCount: 2, added: Array.Empty<int>(), EditPlacement.KeepNatural, relocated: Array.Empty<int>());
 
         Assert.Null(q.Current);
-        Assert.Null(q.PendingResumeItemIndex); // 已经没有可续播的
+        // v5：续播位置在末尾之外时，PendingResumeItemIndex 返回 Count（"接在末尾"），不是 null
+        Assert.Equal(2, q.PendingResumeItemIndex);
         Assert.Null(q.Next(auto: true));
     }
 
     [Fact]
-    public void ApplyEdit_AlwaysClearsIsFinished()
+    public void ApplyEdit_DoesNotClearIsFinished()
     {
+        // v5 修 M-4：ApplyEdit 不再清除 IsFinished，和 Realign 同理——编辑只是列表变了，
+        // 不代表用户又开始播放了（对应设计方案测试 14g）
         var q = new PlaybackQueue(3, PlayMode.Sequential);
         q.Select(0);
         q.Next(auto: true);
@@ -455,7 +458,7 @@ public class PlaybackQueueTests
         var map = new int?[] { 0, 1, 2 };
         q.ApplyEdit(map, newCount: 3, added: Array.Empty<int>(), EditPlacement.KeepNatural, relocated: Array.Empty<int>());
 
-        Assert.False(q.IsFinished);
+        Assert.True(q.IsFinished);
     }
 
     [Fact]
@@ -470,5 +473,83 @@ public class PlaybackQueueTests
 
         Assert.Equal(4, q.Next(auto: true));
         Assert.Equal(5, q.Next(auto: true));
+    }
+
+    // v5 修 M-2、M-3：编辑前 Current 就是 null 时的续播位置计算（方案测试 14a～14e）
+
+    [Fact]
+    public void ApplyEdit_14a_EmptyList_ThenPlayNext_NextReturnsFirstInsertedTrack()
+    {
+        var q = new PlaybackQueue(0, PlayMode.Sequential);
+
+        q.ApplyEdit(Array.Empty<int?>(), newCount: 1, added: new[] { 0 }, EditPlacement.AtStart, relocated: Array.Empty<int>());
+
+        Assert.Equal(0, q.Next(auto: false));
+    }
+
+    [Fact]
+    public void ApplyEdit_14b_NoCurrentNoResumeAt_AppendingDoesNotSkipFirstTrack()
+    {
+        var q = new PlaybackQueue(10, PlayMode.Sequential);
+
+        var map = Enumerable.Range(0, 10).Select(i => (int?)i).ToList();
+        q.ApplyEdit(map, newCount: 11, added: new[] { 10 }, EditPlacement.RandomInRemainder, relocated: Array.Empty<int>());
+
+        Assert.Equal(0, q.Next(auto: false));
+    }
+
+    [Fact]
+    public void ApplyEdit_14c_RemoveCurrentThenPlayNext_ResumesAtNewTrackThenOriginalNext()
+    {
+        var q = new PlaybackQueue(4, PlayMode.Sequential); // A B C D
+        q.Select(1); // B
+
+        // Remove([1])：B 被移除，剩下 [A, C, D]
+        var removeMap = new int?[] { 0, null, 1, 2 };
+        q.ApplyEdit(removeMap, newCount: 3, added: Array.Empty<int>(), EditPlacement.KeepNatural, relocated: Array.Empty<int>());
+        Assert.Null(q.Current);
+        Assert.Equal(1, q.PendingResumeItemIndex); // C，在 [A,C,D] 里下标 1
+
+        // PlayNext([X])：hasCurrent 为假，PendingResumeItemIndex=1 有值，用 AtResume，插到下标 1
+        var playNextMap = new int?[] { 0, 2, 3 }; // A->0, C->2, D->3；X 是新增的下标 1
+        q.ApplyEdit(playNextMap, newCount: 4, added: new[] { 1 }, EditPlacement.AtResume, relocated: Array.Empty<int>());
+
+        Assert.Equal(1, q.Next(auto: true)); // X，在 [A,X,C,D] 里下标 1
+        Assert.Equal(2, q.Next(auto: true)); // C
+    }
+
+    [Fact]
+    public void ApplyEdit_14d_RemoveCurrentThenMove_ResumeAtFollowsRelocationCorrectly()
+    {
+        var q = new PlaybackQueue(4, PlayMode.Sequential); // A B C D
+        q.Select(1); // B
+
+        var removeMap = new int?[] { 0, null, 1, 2 };
+        q.ApplyEdit(removeMap, newCount: 3, added: Array.Empty<int>(), EditPlacement.KeepNatural, relocated: Array.Empty<int>());
+        Assert.Equal(1, q.PendingResumeItemIndex); // C，在 [A,C,D] 里下标 1
+
+        // Move(2, 0)：D（在 [A,C,D] 里下标 2）挪到新列表 [D,A,C] 的下标 0
+        var moveMap = new int?[] { 1, 2, 0 };
+        q.ApplyEdit(moveMap, newCount: 3, added: Array.Empty<int>(), EditPlacement.KeepNatural, relocated: new[] { 2 });
+
+        Assert.Equal(2, q.Next(auto: true)); // C，在 [D,A,C] 里下标 2——续播位置跟着挪动重新计算，没有丢
+    }
+
+    [Fact]
+    public void ApplyEdit_14e_CurrentIsLastTrackRemoved_PendingResumeEqualsCountThenPlayNextResumesAtNewTrack()
+    {
+        var q = new PlaybackQueue(3, PlayMode.Sequential); // A B C
+        q.Select(2); // C，最后一首
+
+        var removeMap = new int?[] { 0, 1, null };
+        q.ApplyEdit(removeMap, newCount: 2, added: Array.Empty<int>(), EditPlacement.KeepNatural, relocated: Array.Empty<int>());
+
+        Assert.Equal(2, q.PendingResumeItemIndex); // 等于 Count，表示"接在末尾"
+
+        // PlayNext([X])：AtResume，插到下标 2（末尾）
+        var playNextMap = new int?[] { 0, 1 };
+        q.ApplyEdit(playNextMap, newCount: 3, added: new[] { 2 }, EditPlacement.AtResume, relocated: Array.Empty<int>());
+
+        Assert.Equal(2, q.Next(auto: true)); // X，在 [A,B,X] 里下标 2
     }
 }

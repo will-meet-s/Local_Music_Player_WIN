@@ -743,17 +743,28 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// 编辑操作共同的收尾：让预加载判断（E-2）能感知到列表变了；
-    /// 编辑后没有当前曲目就停下来，不自动开始播放；否则只是同步一下高亮（当前曲目可能被挪动了位置）。
+    /// 编辑操作共同的收尾：让预加载判断（E-2）能感知到列表变了。
+    /// <para>
+    /// <see cref="EditResult.StopPlayback"/>（v5 修 M-1）才是"该不该停止播放"的依据：只有
+    /// 「<c>IsFinished</c> 为真时的 <c>PlayNext</c>」会置为 true。<see cref="EditResult.NoCurrentAfter"/>
+    /// 不能当这个依据用——移除正在放的歌之后 <c>Current</c> 会变成 null，但引擎里那首歌要继续放完
+    /// （FR-006），这时只清掉播放列表页的高亮，不能卸载引擎。
+    /// </para>
     /// </summary>
     private void ApplyEditSideEffects(EditResult result)
     {
         _listVersion++;
         _engine.InvalidatePreload();
 
-        if (result.NoCurrentAfter)
+        if (result.StopPlayback)
         {
             UnloadBecauseNoCurrent();
+            return;
+        }
+
+        if (result.NoCurrentAfter)
+        {
+            NowPlayingIndex = -1;
             return;
         }
 

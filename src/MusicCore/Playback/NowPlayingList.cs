@@ -13,10 +13,14 @@ public enum NowPlayingState { FollowLibrary, Independent }
 public enum NowPlayingSource { Library, Songlist, Edited }
 
 /// <summary>
-/// 一次编辑操作的结果（T-008 方案 §2.2）。<c>Inserted</c>/<c>Relocated</c> 只有
+/// 一次编辑操作的结果（T-008 方案 v5 §2.2）。<c>Inserted</c>/<c>Relocated</c> 只有
 /// <see cref="NowPlayingList.PlayNext"/>/<see cref="NowPlayingList.Append"/> 会给非零值。
+/// <c>NoCurrentAfter</c> 只供界面刷新高亮用，<b>不能</b>当作"该不该停止播放"的依据——
+/// 移除正在放的歌时 <c>Current</c> 会变成 null，但那首歌必须继续放完（FR-006）。
+/// 真正"该停止播放"的信号是 <c>StopPlayback</c>，只有「<c>IsFinished</c> 为真时的
+/// <see cref="NowPlayingList.PlayNext"/>」会把它置为 true（v5 修复 M-1）。
 /// </summary>
-public readonly record struct EditResult(int Inserted, int Relocated, bool BecameIndependent, bool NoCurrentAfter);
+public readonly record struct EditResult(int Inserted, int Relocated, bool BecameIndependent, bool NoCurrentAfter, bool StopPlayback);
 
 /// <summary>
 /// 播放用的列表，和曲库显示的列表（<see cref="ViewModels.PlayerViewModel.Tracks"/>）分开。
@@ -115,23 +119,30 @@ public sealed class NowPlayingList
         var cur = Queue.Current;
         var wasFinished = Queue.IsFinished;
         var hasCurrent = cur is not null && !wasFinished;
+        // 必须在 ApplyEdit 之前就记下这个值：ApplyEdit 不再清除 IsFinished（v5 修 M-4），
+        // 但 Current 马上会因为 ClearSelection 变成 null，到时候就分不清是这里还是"移除当前曲目"导致的
+        var stopPlayback = !hasCurrent && wasFinished;
 
-        var anchor = hasCurrent ? cur!.Value + 1 : Queue.PendingResumeItemIndex ?? 0;
+        var pendingResumeIndex = Queue.PendingResumeItemIndex;
+        var anchor = hasCurrent ? cur!.Value + 1 : pendingResumeIndex ?? 0;
+        var placement = hasCurrent
+            ? EditPlacement.AfterCurrent
+            : pendingResumeIndex is not null ? EditPlacement.AtResume : EditPlacement.AtStart;
+
         var plan = PlanInsertion(distinct, anchor);
 
         var wasIndependent = State == NowPlayingState.Independent;
         _items.ReplaceAll(plan.NewItems);
-        Queue.ApplyEdit(plan.Map, plan.NewItems.Count, plan.AddedIndices,
-            hasCurrent ? EditPlacement.AfterCurrent : EditPlacement.AtStart, plan.RelocatedOldIndices);
+        Queue.ApplyEdit(plan.Map, plan.NewItems.Count, plan.AddedIndices, placement, plan.RelocatedOldIndices);
 
-        // hasCurrent 为假是因为 IsFinished（cur 本身还在）：这首「已经放完」的曲目不应该继续算作当前曲目，
-        // 否则按「播放」会重播它而不是从新插入的第一首开始（v4 方案 §4.3 步骤 5）
-        if (!hasCurrent && wasFinished) Queue.ClearSelection();
+        // stopPlayback 为真：这首「已经放完」的曲目不应该继续算作当前曲目，
+        // 否则按「播放」会重播它而不是从新插入的第一首开始（v5 方案 §4.3 步骤 5）
+        if (stopPlayback) Queue.ClearSelection();
 
         BecomeIndependentIfNeeded(wasIndependent);
         Changed?.Invoke();
 
-        return new EditResult(distinct.Count, plan.RelocatedOldIndices.Count, !wasIndependent, Queue.Current is null);
+        return new EditResult(distinct.Count, plan.RelocatedOldIndices.Count, !wasIndependent, Queue.Current is null, stopPlayback);
     }
 
     /// <summary>加到末尾（FR-005）。输入按 <see cref="TrackIdentity"/> 去重；正在播放的那首不去掉，会被挪到末尾。</summary>
@@ -149,10 +160,10 @@ public sealed class NowPlayingList
         BecomeIndependentIfNeeded(wasIndependent);
         Changed?.Invoke();
 
-        return new EditResult(distinct.Count, plan.RelocatedOldIndices.Count, !wasIndependent, Queue.Current is null);
+        return new EditResult(distinct.Count, plan.RelocatedOldIndices.Count, !wasIndependent, Queue.Current is null, StopPlayback: false);
     }
 
-    /// <summary>从播放列表移除（FR-006）。下标去重，越界的忽略。</summary>
+    /// <summary>从播放列表移除（FR-006）。下标去重，越界的忽略。正在放的歌被移除时继续放完，不停止（v5 修 M-1）。</summary>
     public EditResult Remove(IReadOnlyList<int> indices)
     {
         var toRemove = indices.Where(i => i >= 0 && i < _items.Count).Distinct().ToList();
@@ -177,7 +188,7 @@ public sealed class NowPlayingList
         BecomeIndependentIfNeeded(wasIndependent);
         Changed?.Invoke();
 
-        return new EditResult(0, 0, !wasIndependent, Queue.Current is null);
+        return new EditResult(0, 0, !wasIndependent, Queue.Current is null, StopPlayback: false);
     }
 
     /// <summary>调整歌单内顺序（FR-007）：移除 <paramref name="from"/> 这一首之后，把它插到新列表的 <paramref name="to"/> 位置上。</summary>
@@ -206,7 +217,7 @@ public sealed class NowPlayingList
         BecomeIndependentIfNeeded(wasIndependent);
         Changed?.Invoke();
 
-        return new EditResult(0, 0, !wasIndependent, Queue.Current is null);
+        return new EditResult(0, 0, !wasIndependent, Queue.Current is null, StopPlayback: false);
     }
 
     /// <summary>清空播放列表（FR-008）。曲库、歌单里的原始文件不受影响，只清内存里的列表。</summary>

@@ -339,6 +339,47 @@ public class NowPlayingListEditTests
         Assert.True(result.NoCurrentAfter);
     }
 
+    // 测试 14f（v5 修 M-1）：移除正在放的歌，StopPlayback 必须是 false —— 引擎里那首继续放完，不能卸载
+
+    [Fact]
+    public void Remove_CurrentTrack_StopPlaybackIsFalseEvenThoughNoCurrentAfter()
+    {
+        var list = new NowPlayingList(PlayMode.Sequential);
+        var tracks = MakeTracks(4);
+        list.PlayFromLibrary(tracks, 1);
+
+        var result = list.Remove(new[] { 1 });
+
+        Assert.True(result.NoCurrentAfter); // Current 确实变成了 null……
+        Assert.False(result.StopPlayback);  // ……但这不等于要停止播放（FR-006）
+    }
+
+    // 测试 14g（v5 修 M-4）：顺序播放放完之后做别的编辑，IsFinished 仍然为 true；
+    // 这时再 PlayNext，因为 hasCurrent 为假（IsFinished），新曲目要插到下标 0，而不是接在已放完的曲目后面
+
+    [Fact]
+    public void Move_AfterSequentialFinished_KeepsIsFinishedTrue_ThenPlayNextInsertsAtStartAndStopsPlayback()
+    {
+        var list = new NowPlayingList(PlayMode.Sequential);
+        var tracks = MakeTracks(4);
+        list.PlayFromLibrary(tracks, 0);
+        list.Queue.Next(auto: true);
+        list.Queue.Next(auto: true);
+        list.Queue.Next(auto: true);
+        Assert.Null(list.Queue.Next(auto: true));
+        Assert.True(list.Queue.IsFinished);
+
+        list.Move(0, 1); // 挪动任意一首，不涉及当前曲目
+
+        Assert.True(list.Queue.IsFinished);
+
+        var newTrack = new Track(@"C:\m\new.mp3");
+        var result = list.PlayNext(new[] { newTrack }, tracks[^1]);
+
+        Assert.True(result.StopPlayback);
+        Assert.Equal(newTrack, list.Items[0]);
+    }
+
     // 测试 15：Clear 清空列表，转为独立状态
 
     [Fact]

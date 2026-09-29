@@ -3,10 +3,12 @@
 namespace MusicCore.Playback;
 
 /// <summary>
-/// <see cref="PlaybackQueue.ApplyEdit"/> 里新加入的曲目该插到哪（T-008 方案 §2.3）。
+/// <see cref="PlaybackQueue.ApplyEdit"/> 里新加入的曲目该插到哪（T-008 方案 v5 §2.3）。
+/// <see cref="AtResume"/>：<c>Current</c> 为 null 且 <c>_resumeAt</c> 有值（正在放的歌已被移除、
+/// 还没放完）时，<c>PlayNext</c> 用它——新曲目插入顺序表的续播位置，续播位置随后指向第一首新曲目。
 /// <see cref="KeepNatural"/> 用于没有新增曲目的编辑（Remove、Move），placement 参数不起作用。
 /// </summary>
-public enum EditPlacement { AfterCurrent, AtStart, RandomInRemainder, KeepNatural }
+public enum EditPlacement { AfterCurrent, AtResume, AtStart, RandomInRemainder, KeepNatural }
 
 /// <summary>
 /// 根据播放模式计算「下一首 / 上一首」的索引。
@@ -51,9 +53,10 @@ public sealed class PlaybackQueue
 
     /// <summary>
     /// 顺序播放模式下已经放到末尾（<see cref="Next"/> 返回了 null）。
-    /// 置为 false 的时机只有四种：<see cref="Select"/>、<see cref="Next"/> 或
-    /// <see cref="Previous"/> 返回非 null、<c>ApplyEdit</c> 执行（T-008 设计方案 §2.3 v4）。
-    /// <see cref="Realign"/> 不在其中 —— 对齐只是列表变了，不代表用户又开始播放了。
+    /// 置为 false 的时机只有三种：<see cref="Select"/>、<see cref="Next"/> 或
+    /// <see cref="Previous"/> 返回非 null（T-008 设计方案 §2.3 v5）。
+    /// <see cref="Realign"/> 和 <c>ApplyEdit</c> 都不在其中 —— 编辑或对齐只是列表变了，
+    /// 不代表用户又开始播放了（v5 修正：v4 曾经让 <c>ApplyEdit</c> 清除它，是错的）。
     /// </summary>
     public bool IsFinished { get; private set; }
 
@@ -224,11 +227,12 @@ public sealed class PlaybackQueue
     internal IReadOnlyList<int> CurrentOrder => _order;
 
     /// <summary>
-    /// <see cref="Current"/> 为 null 时，如果是因为结构性编辑移除了正在播的曲目、引擎还没播完，
-    /// 返回它续播位置对应的列表下标；其余情况（列表为空、已经播到末尾）返回 null
-    /// （T-008 方案 §4.3「确定插入位置」用它判断"引擎还在放一首已经被移除的歌"）。
+    /// <see cref="Current"/> 为 null 时，如果 <c>_resumeAt</c> 有值（结构性编辑移除了正在播的曲目、
+    /// 引擎还没播完），返回它续播位置对应的列表下标；续播位置已经在末尾之外时返回 <see cref="Count"/>
+    /// （表示"接在末尾"）；<c>_resumeAt</c> 本身为 null 时返回 null
+    /// （T-008 方案 v5 §2.3，§4.3「确定插入位置」用它判断"引擎还在放一首已经被移除的歌"）。
     /// </summary>
-    public int? PendingResumeItemIndex => _resumeAt is { } r && r < _order.Count ? _order[r] : null;
+    public int? PendingResumeItemIndex => _resumeAt is { } r ? (r < _order.Count ? _order[r] : Count) : null;
 
     /// <summary>
     /// 列表发生结构性编辑后调用（T-008 方案 §2.3）。
@@ -243,31 +247,68 @@ public sealed class PlaybackQueue
         var oldOrder = _order;
         var oldPosition = _position;
         var oldCurrent = Current;
+        var oldResumeAt = _resumeAt;
 
         Count = newCount;
-        _order = Mode == PlayMode.Shuffle
-            ? BuildShuffledOrderAfterEdit(oldOrder, oldPosition, oldCurrent, map, added, placement, relocated)
-            : Enumerable.Range(0, newCount).ToList(); // 非随机模式直接按新列表自然序重建；新曲目已经在 Items 里的正确位置上了
 
         if (oldCurrent is { } cur && cur < map.Count && map[cur] is { } newIndex)
         {
+            // 当前曲目还在列表里。splitPosition 传 oldPosition + 1：当前曲目自己也算「已播过」
+            _order = BuildNewOrder(oldOrder, oldPosition + 1, oldCurrent, map, added, placement, relocated);
             Current = newIndex;
             _position = _order.IndexOf(newIndex);
             _resumeAt = null;
         }
-        else
+        else if (oldCurrent is not null)
         {
+            // 当前曲目被移除了：从旧位置往后找第一首还留着的歌。当前曲目自己已经不在了，
+            // 但它原来的位置仍然算「已播过」的分界，所以 splitPosition 同样是 oldPosition + 1
+            _order = BuildNewOrder(oldOrder, oldPosition + 1, oldCurrent, map, added, placement, relocated);
             Current = null;
             _position = 0;
-            _resumeAt = ComputeResumeAt(oldOrder, oldPosition, map);
+            _resumeAt = ComputeResumeAt(oldOrder, oldPosition + 1, map);
+        }
+        else if (oldResumeAt is null)
+        {
+            // 编辑前就没有当前曲目，也没有续播位置（例如列表为空、跟随状态下还没点播过）：
+            // 保持 _resumeAt = null，不能套用下面那条去凭空计算出一个续播位置（v5 修正 M-2）
+            _order = BuildNewOrder(oldOrder, 0, null, map, added, placement, relocated);
+            Current = null;
+            _position = 0;
+            _resumeAt = null;
+        }
+        else
+        {
+            // 编辑前没有当前曲目，但有续播位置（正在放的歌之前已被移除、还没放完）：
+            // 必须从旧的续播位置本身开始接着算，不能从 _position（这时恒为 0）重新算（v5 修正 M-3）
+            _order = BuildNewOrder(oldOrder, oldResumeAt.Value, null, map, added, placement, relocated);
+            Current = null;
+            _position = 0;
+            _resumeAt = placement == EditPlacement.AtResume && added.Count > 0
+                ? _order.IndexOf(added[0])
+                : ComputeResumeAt(oldOrder, oldResumeAt.Value, map);
         }
 
         _parkedIndex = null;
-        IsFinished = false;
+        // v5：这里不清除 IsFinished —— 和 Realign 同理，编辑只是列表变了，不代表用户又开始播放了
     }
 
-    /// <summary>已经播过 / 还没播过两段分别处理，最后拼起来（T-008 方案 §2.3 的随机模式规则）。</summary>
-    private List<int> BuildShuffledOrderAfterEdit(List<int> oldOrder, int oldPosition, int? oldCurrent,
+    /// <summary>非随机模式直接按新列表自然序重建；随机模式把顺序表按已播 / 未播两段重新拼起来。</summary>
+    private List<int> BuildNewOrder(List<int> oldOrder, int splitPosition, int? oldCurrent,
+        IReadOnlyList<int?> map, IReadOnlyList<int> added, EditPlacement placement, IReadOnlyCollection<int> relocated) =>
+        Mode == PlayMode.Shuffle
+            ? BuildShuffledOrderAfterEdit(oldOrder, splitPosition, oldCurrent, map, added, placement, relocated)
+            : Enumerable.Range(0, Count).ToList(); // 新曲目已经在 Items 里的正确位置上了，不需要额外处理
+
+    /// <summary>
+    /// 把旧顺序表在 <paramref name="splitPosition"/> 处分成「已播过」<c>played</c>（位置小于
+    /// <paramref name="splitPosition"/>）和「还没播」<c>remaining</c>（位置大于等于）两段，处理完
+    /// <paramref name="relocated"/> 和 <paramref name="added"/> 之后拼起来（T-008 方案 v5 §2.3 的随机模式规则）。
+    /// <paramref name="splitPosition"/> 传 <c>oldPosition + 1</c>（有当前曲目时，当前曲目自己也算已播过），
+    /// 或者续播位置本身（没有当前曲目、但 <c>_resumeAt</c> 有值时，续播位置指向的那首还没播过），
+    /// 或者 0（两者都没有时，等于全部还没播）。
+    /// </summary>
+    private List<int> BuildShuffledOrderAfterEdit(List<int> oldOrder, int splitPosition, int? oldCurrent,
         IReadOnlyList<int?> map, IReadOnlyList<int> added, EditPlacement placement, IReadOnlyCollection<int> relocated)
     {
         var played = new List<int>();
@@ -277,7 +318,7 @@ public sealed class PlaybackQueue
         {
             var oldIndex = oldOrder[i];
             if (oldIndex >= map.Count || map[oldIndex] is not { } newIndex) continue;
-            (i <= oldPosition ? played : remaining).Add(newIndex);
+            (i < splitPosition ? played : remaining).Add(newIndex);
         }
 
         // 本轮已经播过、又被挪动的曲目，重新算作「还没播过」，插到剩余部分里的随机位置；
@@ -288,7 +329,7 @@ public sealed class PlaybackQueue
             if (oldIndex >= map.Count || map[oldIndex] is not { } newIndex) continue;
 
             var oldPosInOrder = oldOrder.IndexOf(oldIndex);
-            if (oldPosInOrder < 0 || oldPosInOrder > oldPosition) continue;
+            if (oldPosInOrder < 0 || oldPosInOrder >= splitPosition) continue;
             if (!played.Remove(newIndex)) continue;
 
             InsertAtRandomPosition(remaining, newIndex);
@@ -297,6 +338,7 @@ public sealed class PlaybackQueue
         switch (placement)
         {
             case EditPlacement.AfterCurrent:
+            case EditPlacement.AtResume:
                 remaining.InsertRange(0, added);
                 break;
             case EditPlacement.AtStart:
@@ -317,12 +359,12 @@ public sealed class PlaybackQueue
         list.Insert(_random.Next(list.Count + 1), value);
 
     /// <summary>
-    /// 当前曲目被移除（或本来就没有）时，续播位置：沿着旧顺序表从旧位置往后找第一首还留着的歌，
+    /// 沿着旧顺序表，从 <paramref name="searchFromInclusive"/>（含）往后找第一首还留着的歌，
     /// 换算成它在新顺序表里的位置；找不到就是新列表的长度（等同「已经播到末尾」）。
     /// </summary>
-    private int ComputeResumeAt(List<int> oldOrder, int oldPosition, IReadOnlyList<int?> map)
+    private int ComputeResumeAt(List<int> oldOrder, int searchFromInclusive, IReadOnlyList<int?> map)
     {
-        for (var i = oldPosition + 1; i < oldOrder.Count; i++)
+        for (var i = searchFromInclusive; i < oldOrder.Count; i++)
         {
             var oldIndex = oldOrder[i];
             if (oldIndex < map.Count && map[oldIndex] is { } newIndex)
