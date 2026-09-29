@@ -61,15 +61,32 @@ public sealed class Preferences
         "WinMusicPlayer",
         "settings.json");
 
+    /// <summary>只做 JSON 解析，不碰文件系统，方便单测覆盖配置格式。</summary>
+    internal static Preferences Parse(string json)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<Preferences>(json, JsonOptions) ?? new Preferences();
+        }
+        catch (JsonException)
+        {
+            // 配置损坏不该拦住启动，用默认值继续
+            return new Preferences();
+        }
+    }
+
+    /// <summary>只做 JSON 序列化，不碰文件系统，方便单测覆盖配置格式。</summary>
+    internal string Serialize() => JsonSerializer.Serialize(this, JsonOptions);
+
     public static Preferences Load()
     {
         try
         {
             if (!File.Exists(FilePath)) return new Preferences();
             var json = File.ReadAllText(FilePath);
-            return JsonSerializer.Deserialize<Preferences>(json, JsonOptions) ?? new Preferences();
+            return Parse(json);
         }
-        catch (Exception e) when (e is IOException or JsonException or UnauthorizedAccessException)
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             // 配置损坏不该拦住启动，用默认值继续
             return new Preferences();
@@ -84,7 +101,7 @@ public sealed class Preferences
             {
                 var directory = Path.GetDirectoryName(FilePath)!;
                 Directory.CreateDirectory(directory);
-                File.WriteAllText(FilePath, JsonSerializer.Serialize(this, JsonOptions));
+                File.WriteAllText(FilePath, Serialize());
             }
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
