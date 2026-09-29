@@ -123,6 +123,7 @@ public sealed class PlayerEngineGaplessTests : IDisposable
         public IWaveProvider? Provider { get; private set; }
         public PlaybackState PlaybackState { get; private set; } = PlaybackState.Stopped;
         public float Volume { get; set; } = 1f;
+        public WaveFormat OutputWaveFormat => Provider?.WaveFormat ?? WaveFormat.CreateIeeeFloatWaveFormat(48000, 2);
 
         public event EventHandler<StoppedEventArgs>? PlaybackStopped;
 
