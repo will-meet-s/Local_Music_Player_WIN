@@ -1,51 +1,56 @@
-﻿using System.ComponentModel;
-using System.Threading.Tasks;
-using System.Windows;
+using Microsoft.UI.Xaml;
 using MusicCore.ViewModels;
+using WinMusicPlayer.Interop;
 
 namespace WinMusicPlayer;
 
 public partial class App : Application
 {
-    private PlayerViewModel? _viewModel;
-    private MainWindow? _mainWindow;
-    private DesktopLyricsWindow? _lyricsWindow;
-    private TrayIcon? _tray;
+    private readonly List<Action> _shutdownActions = new();
+    private bool _quitting;
 
-    protected override void OnStartup(StartupEventArgs e)
+    internal static PlayerViewModel ViewModel { get; private set; } = null!;
+    internal static MainWindow MainWindow { get; private set; } = null!;
+
+    public App()
     {
-        base.OnStartup(e);
+        InitializeComponent();
+
+        // 顺序 1、2：异常钩子和同步上下文检查必须在任何窗口创建之前完成
         HookExceptionLogging();
+        CheckSynchronizationContext();
 
-        _viewModel = new PlayerViewModel();
-        _viewModel.PropertyChanged += OnViewModelChanged;
+        // 顺序 3：只有调用 Quit() 才退出进程，为 T-009 的托盘常驻做准备
+        DispatcherShutdownMode = DispatcherShutdownMode.OnExplicitShutdown;
+    }
 
-        _mainWindow = new MainWindow(_viewModel);
-        _mainWindow.Closed += (_, _) => _mainWindow = null;
-        _mainWindow.Show();
+    protected override void OnLaunched(LaunchActivatedEventArgs args)
+    {
+        // 顺序 4
+        ViewModel = new PlayerViewModel();
 
-        _tray = new TrayIcon(_viewModel, ShowMainWindow, ToggleLyricsLock, IsLyricsLocked, Quit);
+        // 顺序 5
+        MainWindow = new MainWindow();
+        MainWindow.Activate();
 
-        _viewModel.RestoreLastSession();
-
-        // 上次退出时开着桌面歌词，这次自动恢复
-        if (_viewModel.DesktopLyricsEnabled) ShowDesktopLyrics();
+        // 顺序 6
+        ViewModel.RestoreLastSession();
     }
 
     /// <summary>
-    /// 三个入口都要接：UI 线程的异常走 DispatcherUnhandledException，
+    /// 三个入口都要接：XAML 树内的异常走 UnhandledException，
     /// 后台线程的走 AppDomain（此时已无法挽救，只能留下日志），
     /// 而 fire-and-forget 的 Task 异常谁都不抛，只能靠 UnobservedTaskException。
     /// </summary>
     private void HookExceptionLogging()
     {
-        DispatcherUnhandledException += (_, args) =>
+        UnhandledException += (_, args) =>
         {
-            CrashLog.Write("Dispatcher", args.Exception);
-            MessageBox.Show(
+            CrashLog.Write("Xaml", args.Exception);
+            NativeMessageBox.Show(
                 $"发生未处理异常，已记录到：\n{CrashLog.FilePath}\n\n" +
-                $"{args.Exception.GetType().Name}: {args.Exception.Message}",
-                "WinMusicPlayer", MessageBoxButton.OK, MessageBoxImage.Error);
+                $"{args.Exception.GetType().Name}: {args.Message}",
+                "WinMusicPlayer");
 
             // 标记已处理，先别让进程退出 —— 闪退时什么都看不到，最难查
             args.Handled = true;
@@ -61,60 +66,54 @@ public partial class App : Application
         };
     }
 
-    private void OnViewModelChanged(object? sender, PropertyChangedEventArgs e)
-    {
-        if (e.PropertyName != nameof(PlayerViewModel.DesktopLyricsEnabled)) return;
-
-        if (_viewModel!.DesktopLyricsEnabled) ShowDesktopLyrics();
-        else CloseDesktopLyrics();
-    }
-
-    private void ShowDesktopLyrics()
-    {
-        if (_lyricsWindow is not null) return;
-
-        _lyricsWindow = new DesktopLyricsWindow(_viewModel!);
-        _lyricsWindow.Closed += (_, _) => _lyricsWindow = null;
-        _lyricsWindow.Show();
-    }
-
-    private void CloseDesktopLyrics()
-    {
-        _lyricsWindow?.Close();
-        _lyricsWindow = null;
-    }
-
-    private void ToggleLyricsLock()
-    {
-        if (_lyricsWindow is null) return;
-        _lyricsWindow.SetLocked(!_lyricsWindow.IsLocked);
-    }
-
-    private bool IsLyricsLocked() => _lyricsWindow?.IsLocked ?? false;
-
     /// <summary>
-    /// 主窗口关掉后 App 仍驻留在托盘继续放歌，所以这里可能要重建窗口。
+    /// PlayerEngine 在构造时抓取当前上下文，把所有事件投递回这个线程（PlayerEngine.cs:40）。
+    /// 拿不到时引擎会回退到线程池上下文，属性通知跨线程访问 UI 会直接崩溃，不允许带着这个问题继续运行。
     /// </summary>
-    private void ShowMainWindow()
+    private static void CheckSynchronizationContext()
     {
-        if (_mainWindow is null)
+        var context = SynchronizationContext.Current;
+
+        if (context is null)
         {
-            _mainWindow = new MainWindow(_viewModel!);
-            _mainWindow.Closed += (_, _) => _mainWindow = null;
+            CrashLog.WriteNote("Startup",
+                $"SynchronizationContext.Current 为空，PlayerEngine 的事件将无法安全投递回 UI 线程。OS: {Environment.OSVersion}");
+            throw new InvalidOperationException("启动时 SynchronizationContext.Current 为空，无法安全初始化播放引擎");
         }
 
-        _mainWindow.Show();
-        if (_mainWindow.WindowState == WindowState.Minimized)
-            _mainWindow.WindowState = WindowState.Normal;
-
-        _mainWindow.Activate();
+        CrashLog.WriteNote("Startup",
+            $"SynchronizationContext: {context.GetType().Name}; OS: {Environment.OSVersion}; " +
+            $"WindowsAppSDK runtime: {GetWindowsAppSdkVersion()}");
     }
 
-    private void Quit()
+    private static string GetWindowsAppSdkVersion() =>
+        typeof(Microsoft.UI.Xaml.Application).Assembly.GetName().Version?.ToString() ?? "(未知)";
+
+    /// <summary>
+    /// 注册退出时要做的清理（T-008 关桌面歌词、T-009 释放托盘等）。
+    /// 按注册的逆序执行，每一项都各自 try/catch，一项出错不影响其余项。
+    /// </summary>
+    internal void RegisterShutdown(Action action) => _shutdownActions.Add(action);
+
+    internal void Quit()
     {
-        CloseDesktopLyrics();
-        _tray?.Dispose();
-        _viewModel?.Dispose();
-        Shutdown();
+        // Quit() 可能从关窗和托盘菜单两处先后触发，用标志保证只执行一次
+        if (_quitting) return;
+        _quitting = true;
+
+        for (var i = _shutdownActions.Count - 1; i >= 0; i--)
+        {
+            try
+            {
+                _shutdownActions[i]();
+            }
+            catch (Exception ex)
+            {
+                CrashLog.Write("Shutdown", ex);
+            }
+        }
+
+        ViewModel.Dispose();
+        Exit();
     }
 }

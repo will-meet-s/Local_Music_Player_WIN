@@ -2,27 +2,27 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net10.0-windows</TargetFramework>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
-    <UseWPF>true</UseWPF>
-    <!-- 托盘图标用 WinForms 的 NotifyIcon，WPF 自身没有对应控件 -->
-    <UseWindowsForms>true</UseWindowsForms>
-    <ApplicationIcon>Resources\AppIcon.ico</ApplicationIcon>
+    <UseWinUI>true</UseWinUI>
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <EnableMsixTooling>true</EnableMsixTooling>
+    <Platforms>x64</Platforms>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <PlatformTarget>x64</PlatformTarget>
     <AssemblyName>WinMusicPlayer</AssemblyName>
     <RootNamespace>WinMusicPlayer</RootNamespace>
+    <ApplicationIcon>Resources\AppIcon.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- UseWindowsForms 会把 System.Windows.Forms 和 System.Drawing 加进隐式 using，
-         与 WPF 的 System.Windows / System.Windows.Media 大面积同名：Application、
-         UserControl、MouseEventArgs、Color、Brush、Point、Size 都会变成 CS0104。
-         WinForms 只用在 TrayIcon.cs（托盘 NotifyIcon），那个文件自带显式 using，
-         所以这里把隐式项摘掉，其余文件一律按 WPF 解析。 -->
-    <Using Remove="System.Windows.Forms" />
-    <Using Remove="System.Drawing" />
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.7.250310001" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.1742" />
   </ItemGroup>
 
   <ItemGroup>
@@ -30,7 +30,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Resource Include="Resources\AppIcon.ico" />
+    <Content Include="Resources\AppIcon.ico">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
 
 </Project>
