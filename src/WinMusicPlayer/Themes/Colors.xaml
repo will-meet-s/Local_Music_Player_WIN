@@ -41,4 +41,12 @@
         <Setter Property="Padding" Value="6" />
     </Style>
 
+    <!-- 设置面板底色，和基线一致，§4 对比度 K-1、K-3 要在同一种背景上比较才公平 -->
+    <SolidColorBrush x:Key="SettingsPanelBrush" Color="#F21E1E22" />
+
+    <Style x:Key="SettingsSectionTitle" TargetType="TextBlock">
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Margin" Value="0,0,0,8" />
+    </Style>
+
 </ResourceDictionary>
