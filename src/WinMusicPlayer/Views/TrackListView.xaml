@@ -12,8 +12,71 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <!-- T-003：搜索框、排序控件 -->
-        <StackPanel x:Name="SearchSortHost" Grid.Row="0" Margin="10,8" />
+        <!-- 搜索框、排序控件 -->
+        <StackPanel x:Name="SearchSortHost" Grid.Row="0" Margin="10,8">
+            <Border Background="{StaticResource ControlFillBrush}" CornerRadius="6" Padding="8,5">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock Grid.Column="0" FontFamily="{StaticResource IconFont}" Text="&#xE721;"
+                               Foreground="{StaticResource SecondaryTextBrush}" VerticalAlignment="Center" />
+
+                    <TextBox x:Name="SearchBox" Grid.Column="1" Margin="6,0"
+                             PlaceholderText="搜索歌曲、歌手、专辑"
+                             Background="Transparent" BorderThickness="0"
+                             TextChanged="OnSearchBoxTextChanged">
+                        <TextBox.Resources>
+                            <SolidColorBrush x:Key="TextControlBackground" Color="Transparent" />
+                            <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="Transparent" />
+                            <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="Transparent" />
+                            <SolidColorBrush x:Key="TextControlBorderBrush" Color="Transparent" />
+                            <SolidColorBrush x:Key="TextControlBorderBrushPointerOver" Color="Transparent" />
+                            <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="Transparent" />
+                            <StaticResource x:Key="TextControlPlaceholderForeground" ResourceKey="SecondaryTextBrush" />
+                            <StaticResource x:Key="TextControlPlaceholderForegroundPointerOver" ResourceKey="SecondaryTextBrush" />
+                            <StaticResource x:Key="TextControlPlaceholderForegroundFocused" ResourceKey="SecondaryTextBrush" />
+                        </TextBox.Resources>
+                    </TextBox>
+
+                    <Button Grid.Column="2" Style="{StaticResource IconButton}"
+                            FontSize="12" Padding="2"
+                            Content="&#xE711;"
+                            Command="{x:Bind ViewModel.ClearSearchCommand}"
+                            Visibility="{x:Bind ViewModel.IsFiltering, Mode=OneWay}"
+                            ToolTipService.ToolTip="清除搜索" />
+                </Grid>
+            </Border>
+
+            <Grid Margin="0,8,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <ComboBox x:Name="SortBox" Grid.Column="0" Width="104"
+                          SelectionChanged="OnSortBoxSelectionChanged">
+                    <ComboBoxItem Content="文件顺序" />
+                    <ComboBoxItem Content="歌曲名" />
+                    <ComboBoxItem Content="歌手名" />
+                </ComboBox>
+
+                <Button Grid.Column="1" Style="{StaticResource IconButton}"
+                        FontSize="13" Margin="4,0,0,0"
+                        Content="{x:Bind views:ViewFormat.SortGlyph(ViewModel.SortAscending), Mode=OneWay}"
+                        Command="{x:Bind ViewModel.ToggleSortDirectionCommand}"
+                        ToolTipService.ToolTip="{x:Bind views:ViewFormat.SortTip(ViewModel.SortAscending), Mode=OneWay}" />
+
+                <TextBlock x:Name="MatchCount" Grid.Column="2"
+                           HorizontalAlignment="Right" VerticalAlignment="Center"
+                           FontSize="11" Foreground="{StaticResource SecondaryTextBrush}"
+                           Visibility="{x:Bind ViewModel.IsFiltering, Mode=OneWay}" />
+            </Grid>
+        </StackPanel>
 
         <Border Grid.Row="1" Height="1" Background="{StaticResource SeparatorBrush}" />
 
