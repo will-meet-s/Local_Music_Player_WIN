@@ -25,4 +25,8 @@ internal static class ViewFormat
     public static string PlayPauseGlyph(bool isPlaying) => isPlaying ? "\uF8AE" : "\uF5B0";
 
     public static string PlayPauseTip(bool isPlaying) => isPlaying ? "暂停" : "播放";
+
+    public static string LayoutTip(string name) => $"当前：{name}，点击切换";
+
+    public static string Percent(double value) => $"{Math.Round(value * 100)}%";
 }

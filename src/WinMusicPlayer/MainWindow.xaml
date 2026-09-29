@@ -5,8 +5,9 @@
     xmlns:views="using:WinMusicPlayer.Views">
 
     <Grid x:Name="RootLayer">
-        <!-- 背景层单独一层，透明度只作用于它；文字和控件始终 100% 不透明。T-007 会用到 -->
-        <Rectangle x:Name="BackdropLayer" Fill="#FF1A1A1E" Opacity="1" />
+        <!-- 背景层单独一层，透明度只作用于它；文字和控件始终 100% 不透明 -->
+        <Rectangle x:Name="BackdropLayer" Fill="#FF1A1A1E"
+                   Opacity="{x:Bind ViewModel.BackgroundOpacity, Mode=OneWay}" />
 
         <Grid>
             <Grid.RowDefinitions>

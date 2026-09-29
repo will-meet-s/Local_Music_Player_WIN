@@ -17,6 +17,10 @@ public sealed partial class MainWindow : Window
     {
         InitializeComponent();
 
+        var applied = WindowBackdrop.Apply(this, RootLayer);
+        CrashLog.WriteNote(applied ? "Backdrop-ok" : "Backdrop-fallback",
+            WindowBackdrop.Diagnostics ?? "(无诊断信息)");
+
         Title = "音乐播放器";
         AppWindow.Title = "音乐播放器";
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Resources", "AppIcon.ico"));
