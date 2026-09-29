@@ -35,4 +35,16 @@
     </Content>
   </ItemGroup>
 
+  <!--
+    单文件发布时，被引用项目的调试符号（MusicCore.pdb）不会打进 exe，会单独留在
+    发布目录里，违反 FR-012 ①「只有一个 exe」。pubxml 里的 DebugType=none 只对本工程
+    生效，管不到被引用的项目，所以这里直接从发布清单里剔除。调试符号运行时用不到。
+  -->
+  <Target Name="ExcludeSymbolsFromPublish" AfterTargets="ComputeResolvedFilesToPublishList">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+                             Condition="'%(ResolvedFileToPublish.Extension)' == '.pdb'" />
+    </ItemGroup>
+  </Target>
+
 </Project>
