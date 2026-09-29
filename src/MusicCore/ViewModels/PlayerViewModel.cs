@@ -11,15 +11,16 @@ namespace MusicCore.ViewModels;
 /// UI 的唯一数据源：串联扫描、元数据、歌词、播放队列与播放引擎。
 /// <para>
 /// 曲库有两份：<see cref="Library"/> 是扫描出来的全量（文件顺序，不动），
-/// <see cref="Tracks"/> 是经过搜索过滤与排序后<b>实际展示和播放</b>的列表。
-/// 播放队列按 <c>Tracks</c> 的下标工作，所以排序或搜索一变，队列必须跟着重建 ——
-/// 这件事统一在 <see cref="RebuildDisplayed"/> 里做。
+/// <see cref="Tracks"/> 是经过搜索过滤与排序后<b>曲库列表实际展示</b>的列表。
+/// 播放用的列表是 <see cref="NowPlaying"/>（T-001）：跟随状态下它是 <c>Tracks</c> 的镜像，
+/// 由 <see cref="RebuildDisplayed"/> 通过 <see cref="NowPlayingList.SyncFromLibrary"/> 保持同步；
+/// 独立状态（编辑或来自歌单）下则不受搜索 / 排序影响。播放队列按 <c>NowPlaying.Items</c> 的下标工作，
+/// <see cref="CurrentIndex"/>（曲库列表高亮）与 <see cref="NowPlayingIndex"/>（播放列表高亮）分别独立维护。
 /// </para>
 /// </summary>
 public sealed class PlayerViewModel : ObservableObject, IDisposable
 {
     private readonly PlayerEngine _engine = new();
-    private readonly PlaybackQueue _queue;
     private readonly Preferences _preferences;
 
     private CancellationTokenSource? _metadataCts;
@@ -43,7 +44,12 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
         _exclusiveOutputEnabled = _preferences.ExclusiveOutputEnabled;
         _desktopLyricsEnabled = _preferences.DesktopLyricsEnabled;
 
-        _queue = new PlaybackQueue(0, _playMode);
+        NowPlaying = new NowPlayingList(_playMode);
+        NowPlaying.Changed += () =>
+        {
+            Raise(nameof(NowPlayingHeader));
+            Raise(nameof(NowPlayingSourceText));
+        };
 
         _engine.Volume = _volume;
         _engine.ExclusiveMode = _exclusiveOutputEnabled;
@@ -60,6 +66,7 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
         ClearSearchCommand = new RelayCommand(() => SearchText = "");
         ToggleSortDirectionCommand = new RelayCommand(() => SortAscending = !SortAscending);
         PlayAtCommand = new RelayCommand<int>(PlayAt);
+        PlayNowPlayingAtCommand = new RelayCommand<int>(PlayNowPlayingAt);
     }
 
     // MARK: - 曲库
@@ -152,13 +159,49 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
 
     // MARK: - 播放状态
 
-    /// <summary>当前曲目在 <see cref="Tracks"/> 里的下标。被搜索过滤掉时为 -1。</summary>
+    /// <summary>当前曲目在 <see cref="Tracks"/> 里的下标。被搜索过滤掉时为 -1。曲库列表的高亮用它，含义不变。</summary>
     private int _currentIndex = -1;
     public int CurrentIndex
     {
         get => _currentIndex;
         private set => Set(ref _currentIndex, value);
     }
+
+    /// <summary>播放用的列表，和曲库显示的 <see cref="Tracks"/> 分开（T-001）。界面直接绑定它的 Items。</summary>
+    public NowPlayingList NowPlaying { get; }
+
+    /// <summary>当前曲目在 <see cref="NowPlaying"/>.Items 里的下标，没有时为 -1。播放列表页的高亮用它。</summary>
+    private int _nowPlayingIndex = -1;
+    public int NowPlayingIndex
+    {
+        get => _nowPlayingIndex;
+        private set
+        {
+            if (!Set(ref _nowPlayingIndex, value)) return;
+            Raise(nameof(NowPlayingHeader));
+        }
+    }
+
+    /// <summary>例如「来源：曲库 · 共 10 首 · 当前第 3 首」；没有当前曲目时省略最后一段；列表为空时是「播放列表为空」。</summary>
+    public string NowPlayingHeader
+    {
+        get
+        {
+            var count = NowPlaying.Items.Count;
+            if (count == 0) return "播放列表为空";
+
+            var header = $"来源：{NowPlayingSourceText} · 共 {count} 首";
+            return NowPlayingIndex >= 0 ? $"{header} · 当前第 {NowPlayingIndex + 1} 首" : header;
+        }
+    }
+
+    public string NowPlayingSourceText => NowPlaying.Source switch
+    {
+        NowPlayingSource.Library => "曲库",
+        NowPlayingSource.Songlist => $"歌单「{NowPlaying.SourceName}」",
+        NowPlayingSource.Edited => "已手动调整",
+        _ => ""
+    };
 
     /// <summary>正在播放的曲目本身。不受过滤影响，右侧「正在播放」区读这个。</summary>
     private Track? _playingTrack;
@@ -272,7 +315,7 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
         set
         {
             if (!Set(ref _playMode, value)) return;
-            _queue.Mode = value;
+            NowPlaying.Queue.Mode = value;
             _preferences.PlayMode = value;
             _preferences.Save();
             Raise(nameof(PlayModeGlyph));
@@ -399,6 +442,7 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
     public RelayCommand ClearSearchCommand { get; }
     public RelayCommand ToggleSortDirectionCommand { get; }
     public RelayCommand<int> PlayAtCommand { get; }
+    public RelayCommand<int> PlayNowPlayingAtCommand { get; }
 
     // MARK: - 曲库扫描
 
@@ -422,6 +466,7 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
         _preferences.Save();
 
         CurrentIndex = -1;
+        NowPlayingIndex = -1;
         PlayingTrack = null;
         PlayingTrackMissing = false;
         CurrentTime = 0;
@@ -557,34 +602,24 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
     /// </summary>
     private void RebuildDisplayed()
     {
-        // 先记住当前曲目在旧列表里的序号，它从新列表消失时要靠这个定位
-        var previousIndex = CurrentIndex;
+        // 先记住当前曲目在播放列表里的序号，跟随状态下同步曲库时用它停靠位置
+        var previousNowPlayingIndex = NowPlayingIndex;
 
         var filtered = TrackFilter.Apply(_library, SearchText, SortOrder, SortAscending);
 
         Tracks.Clear();
         foreach (var track in filtered) Tracks.Add(track);
 
-        _queue.SetCount(Tracks.Count);
+        // 跟随状态下，播放列表整体替换成新的曲库展示结果，队列跟着重新对齐；
+        // 独立状态下播放列表和队列都不动（T-001 设计方案 §4.1）
+        if (NowPlaying.State == NowPlayingState.FollowLibrary)
+            NowPlaying.SyncFromLibrary(Tracks, _playingTrack, previousNowPlayingIndex);
 
-        var playingPath = _playingTrack?.Path;
-        var index = playingPath is null
-            ? -1
-            : IndexOfPath(playingPath);
+        NowPlayingIndex = NowPlaying.CurrentIndex ?? -1;
 
-        if (index >= 0)
-        {
-            _queue.Select(index);
-            CurrentIndex = index;
-        }
-        else
-        {
-            // 当前曲目不在新列表里：可能是文件被删了，也可能只是被搜索过滤掉。
-            // 停靠在它原来的序号上，播完从那个位置接着走，而不是跳回列表开头。
-            if (previousIndex >= 0) _queue.Park(previousIndex);
-            else _queue.ClearSelection();
-            CurrentIndex = -1;
-        }
+        // CurrentIndex 的含义不变：正在播的曲目在 Tracks 里的下标，曲库列表高亮用它，
+        // 与播放列表状态无关，独立状态下也照样按路径在 Tracks 里找
+        CurrentIndex = _playingTrack is null ? -1 : IndexOfPath(_playingTrack.Path);
 
         UpdatePlayingTrackMissing();
 
@@ -592,10 +627,12 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
         _engine.InvalidatePreload();
     }
 
+    /// <summary>在 <see cref="Tracks"/> 里按路径定位，用于曲库列表的高亮（<see cref="CurrentIndex"/>）。</summary>
     private int IndexOfPath(string path)
     {
+        var key = TrackIdentity.Normalize(path);
         for (var i = 0; i < Tracks.Count; i++)
-            if (TrackIdentity.AreSame(Tracks[i].Path, path))
+            if (string.Equals(Tracks[i].IdentityKey, key, StringComparison.OrdinalIgnoreCase))
                 return i;
         return -1;
     }
@@ -613,7 +650,8 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
             return;
         }
 
-        PlayingTrackMissing = !_library.Any(t => TrackIdentity.AreSame(t.Path, track.Path));
+        var key = TrackIdentity.Normalize(track.Path);
+        PlayingTrackMissing = !_library.Any(t => string.Equals(t.IdentityKey, key, StringComparison.OrdinalIgnoreCase));
     }
 
     // MARK: - 播放控制
@@ -621,7 +659,15 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
     public void PlayAt(int index)
     {
         if (index < 0 || index >= Tracks.Count) return;
-        _queue.Select(index);
+        NowPlaying.PlayFromLibrary(Tracks, index);
+        StartCurrent();
+    }
+
+    /// <summary>在播放列表页里双击。</summary>
+    public void PlayNowPlayingAt(int index)
+    {
+        if (index < 0 || index >= NowPlaying.Items.Count) return;
+        NowPlaying.SelectInList(index);
         StartCurrent();
     }
 
@@ -630,7 +676,7 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
         if (_playingTrack is null)
         {
             // 还没选歌时，播放键等同于从头开始
-            if (_queue.Next(auto: false) is not null) StartCurrent();
+            if (NowPlaying.Queue.Next(auto: false) is not null) StartCurrent();
             return;
         }
 
@@ -657,7 +703,7 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
             return;
         }
 
-        if (_queue.Previous() is null) return;
+        if (NowPlaying.Queue.Previous() is null) return;
         StartCurrent();
     }
 
@@ -672,7 +718,7 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
     /// <summary>手动切歌。自动推进由引擎的无缝管线负责，不走这里。</summary>
     private void Advance(bool auto)
     {
-        if (_queue.Next(auto) is null)
+        if (NowPlaying.Queue.Next(auto) is null)
         {
             // 顺序播放到达列表末尾
             Stop();
@@ -683,11 +729,12 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
 
     private void StartCurrent()
     {
-        if (_queue.Current is not { } index || index < 0 || index >= Tracks.Count) return;
+        if (NowPlaying.Queue.Current is not { } index || index < 0 || index >= NowPlaying.Items.Count) return;
 
-        var track = Tracks[index];
+        var track = NowPlaying.Items[index];
 
-        CurrentIndex = index;
+        NowPlayingIndex = index;
+        CurrentIndex = IndexOfPath(track.Path);
         PlayingTrack = track;
         PlayingTrackMissing = false;
         CurrentTime = 0;
@@ -702,30 +749,26 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
     private void HandleAutoAdvance(PlayableItem item)
     {
         // 推进播放队列。正常情况它给出的就是引擎已经切到的那首；
-        // 若期间列表被排序 / 过滤改动过，就按路径重新对齐。
-        var expected = _queue.Next(auto: true);
-        var actual = IndexOfPath(item.Path);
+        // 若期间播放列表被编辑过，就按路径重新对齐（下标现在指 NowPlaying.Items）。
+        var expected = NowPlaying.Queue.Next(auto: true);
+        var items = NowPlaying.Items;
 
-        if (expected is { } e && e >= 0 && e < Tracks.Count &&
-            TrackIdentity.AreSame(Tracks[e].Path, item.Path))
+        int index;
+        if (expected is { } e && e >= 0 && e < items.Count && TrackIdentity.AreSame(items[e].Path, item.Path))
         {
-            CurrentIndex = e;
-        }
-        else if (actual >= 0)
-        {
-            _queue.Select(actual);
-            CurrentIndex = actual;
+            index = e;
         }
         else
         {
-            // 这首已被搜索过滤掉，继续播但列表里不高亮
-            CurrentIndex = -1;
+            index = IndexOfItemPath(items, item.Path);
+            if (index >= 0) NowPlaying.SelectInList(index);
         }
 
-        var track = CurrentIndex >= 0
-            ? Tracks[CurrentIndex]
-            : _library.FirstOrDefault(t => TrackIdentity.AreSame(t.Path, item.Path))
-              ?? new Track(item.Path);
+        NowPlayingIndex = index;
+        CurrentIndex = IndexOfPath(item.Path);
+
+        // 独立状态下，正在放的歌可能不在曲库里（例如来自歌单），这时退回构造一个临时 Track
+        var track = index >= 0 ? items[index] : new Track(item.Path);
 
         PlayingTrack = track;
         CurrentTime = 0;
@@ -734,6 +777,16 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
         IsPlaying = true;
         _consecutiveFailures = 0;
         UpdatePlayingTrackMissing();
+    }
+
+    /// <summary>在 <see cref="NowPlaying"/>.Items 里按路径定位，用于自动切歌时重新对齐队列。</summary>
+    private static int IndexOfItemPath(IReadOnlyList<Track> items, string path)
+    {
+        var key = TrackIdentity.Normalize(path);
+        for (var i = 0; i < items.Count; i++)
+            if (string.Equals(items[i].IdentityKey, key, StringComparison.OrdinalIgnoreCase))
+                return i;
+        return -1;
     }
 
     /// <summary>组装引擎需要的播放条目：路径 + 归一化增益 + 采样率。</summary>
@@ -763,9 +816,9 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
         // PeekNext 不能有副作用 —— 此刻当前曲还在播，队列位置不能动。
         _engine.ProvideNext = () =>
         {
-            if (_queue.PeekNext(auto: true) is not { } index) return null;
-            if (index < 0 || index >= Tracks.Count) return null;
-            return ToPlayable(Tracks[index]);
+            if (NowPlaying.Queue.PeekNext(auto: true) is not { } index) return null;
+            if (index < 0 || index >= NowPlaying.Items.Count) return null;
+            return ToPlayable(NowPlaying.Items[index]);
         };
 
         _engine.Advanced += HandleAutoAdvance;
@@ -774,7 +827,7 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
         {
             // 管线里没有下一首了。顺序播放到底就是停；随机模式一轮播完时
             // PeekNext 拿不到新顺序，此处补一次真正的推进。
-            if (_queue.Next(auto: true) is { } next && next >= 0 && next < Tracks.Count)
+            if (NowPlaying.Queue.Next(auto: true) is { } next && next >= 0 && next < NowPlaying.Items.Count)
                 StartCurrent();
             else
                 Stop();
@@ -795,11 +848,12 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
             // 坏文件不该卡住播放，自动跳过；但整个列表都放不出来时必须停下，
             // 否则会在队列里无限打转。
             _consecutiveFailures++;
-            if (_consecutiveFailures >= Math.Max(1, Tracks.Count))
+            if (_consecutiveFailures >= Math.Max(1, NowPlaying.Items.Count))
             {
                 ErrorMessage = "列表中的音频都无法播放，已停止";
                 _engine.Unload();
                 CurrentIndex = -1;
+                NowPlayingIndex = -1;
                 PlayingTrack = null;
                 return;
             }

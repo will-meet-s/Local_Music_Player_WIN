@@ -36,6 +36,13 @@ public sealed class PlaybackQueue
 
     public int? Current { get; private set; }
 
+    /// <summary>
+    /// 顺序播放模式下已经放到末尾（<see cref="Next"/> 返回了 null）。
+    /// 之后任何一次 <see cref="Select"/>、<see cref="Next"/> 成功，都会把它清掉
+    /// （T-001 设计方案 §2.3；<c>ApplyEdit</c> 清除它是 T-008 的事）。
+    /// </summary>
+    public bool IsFinished { get; private set; }
+
     public PlayMode Mode
     {
         get => _mode;
@@ -62,6 +69,7 @@ public sealed class PlaybackQueue
         Current = index;
         _position = Math.Max(0, _order.IndexOf(index));
         _parkedIndex = null;
+        IsFinished = false;
     }
 
     /// <summary>清除当前选中项，下一次 <see cref="Next"/> 从顺序表头部重新开始。</summary>
@@ -127,6 +135,13 @@ public sealed class PlaybackQueue
     /// </param>
     /// <returns>下一首的索引；顺序播放到达末尾时返回 null，表示应停止播放。</returns>
     public int? Next(bool auto)
+    {
+        var result = ComputeNext(auto);
+        IsFinished = result is null;
+        return result;
+    }
+
+    private int? ComputeNext(bool auto)
     {
         if (Count == 0) return null;
         if (Current is not { } c) return StartFromParkedOrFirst();

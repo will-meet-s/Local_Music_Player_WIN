@@ -286,4 +286,68 @@ public class PlaybackQueueTests
         Assert.Null(q.PeekNext(auto: true));
         Assert.Null(q.Next(auto: true));
     }
+
+    // IsFinished（T-001，供 T-008 的编辑操作判断「是否还有当前曲目」用）
+
+    [Fact]
+    public void IsFinished_FalseInitially()
+    {
+        var q = new PlaybackQueue(3, PlayMode.Sequential);
+        Assert.False(q.IsFinished);
+    }
+
+    [Fact]
+    public void IsFinished_TrueWhenSequentialReachesEnd()
+    {
+        var q = new PlaybackQueue(3, PlayMode.Sequential);
+        q.Select(0);
+
+        q.Next(auto: true);
+        q.Next(auto: true);
+        Assert.False(q.IsFinished);
+
+        Assert.Null(q.Next(auto: true));
+        Assert.True(q.IsFinished);
+    }
+
+    [Fact]
+    public void IsFinished_ClearedBySelect()
+    {
+        var q = new PlaybackQueue(3, PlayMode.Sequential);
+        q.Select(0);
+        q.Next(auto: true);
+        q.Next(auto: true);
+        q.Next(auto: true);
+        Assert.True(q.IsFinished);
+
+        q.Select(0);
+
+        Assert.False(q.IsFinished);
+    }
+
+    [Fact]
+    public void IsFinished_ClearedBySuccessfulNext()
+    {
+        var q = new PlaybackQueue(3, PlayMode.Sequential);
+        q.Select(0);
+        q.Next(auto: true);
+        q.Next(auto: true);
+        Assert.Null(q.Next(auto: true));
+        Assert.True(q.IsFinished);
+
+        // 换成列表循环后，Next 能重新成功推进，IsFinished 应该被清掉
+        q.Mode = PlayMode.RepeatAll;
+        Assert.Equal(0, q.Next(auto: true));
+        Assert.False(q.IsFinished);
+    }
+
+    [Fact]
+    public void IsFinished_StaysFalseDuringRepeatOneAutoRepeat()
+    {
+        var q = new PlaybackQueue(3, PlayMode.RepeatOne);
+        q.Select(1);
+
+        Assert.Equal(1, q.Next(auto: true));
+        Assert.False(q.IsFinished);
+    }
 }
