@@ -3,6 +3,12 @@
 namespace MusicCore.Playback;
 
 /// <summary>
+/// <see cref="PlaybackQueue.ApplyEdit"/> 里新加入的曲目该插到哪（T-008 方案 §2.3）。
+/// <see cref="KeepNatural"/> 用于没有新增曲目的编辑（Remove、Move），placement 参数不起作用。
+/// </summary>
+public enum EditPlacement { AfterCurrent, AtStart, RandomInRemainder, KeepNatural }
+
+/// <summary>
 /// 根据播放模式计算「下一首 / 上一首」的索引。
 /// <para>
 /// 只关心索引，不持有曲目数据，因此可以脱离音频完全单测。
@@ -22,6 +28,13 @@ public sealed class PlaybackQueue
     /// 存曲目下标是因为顺序表会随排序 / 洗牌重建。
     /// </summary>
     private int? _parkedIndex;
+
+    /// <summary>
+    /// 结构性编辑（<see cref="ApplyEdit"/>）导致当前曲目被移除后，续播的位置——
+    /// **顺序表下标**，不是曲目下标（T-008 方案 §2.3）。和 <see cref="_parkedIndex"/> 是两套
+    /// 互不影响的机制：跟随状态下的 <see cref="Park"/> 继续用 <see cref="_parkedIndex"/>。
+    /// </summary>
+    private int? _resumeAt;
 
     private PlayMode _mode;
 
@@ -60,6 +73,7 @@ public sealed class PlaybackQueue
     {
         Count = Math.Max(0, newCount);
         if (Current is { } c && c >= Count) Current = null;
+        _resumeAt = null;
         RebuildOrder();
     }
 
@@ -68,6 +82,7 @@ public sealed class PlaybackQueue
     {
         if (!SelectCore(index)) return;
         IsFinished = false;
+        _resumeAt = null;
     }
 
     /// <summary>
@@ -92,6 +107,7 @@ public sealed class PlaybackQueue
         Current = null;
         _position = 0;
         _parkedIndex = null;
+        _resumeAt = null;
     }
 
     /// <summary>
@@ -126,7 +142,7 @@ public sealed class PlaybackQueue
     public int? PeekNext(bool auto)
     {
         if (Count == 0) return null;
-        if (Current is not { } c) return ParkedTarget;
+        if (Current is not { } c) return _resumeAt is { } r ? PeekFromResumeAt(r) : ParkedTarget;
 
         if (auto && Mode == PlayMode.RepeatOne) return c;
 
@@ -158,7 +174,7 @@ public sealed class PlaybackQueue
     private int? ComputeNext(bool auto)
     {
         if (Count == 0) return null;
-        if (Current is not { } c) return StartFromParkedOrFirst();
+        if (Current is not { } c) return _resumeAt is { } r ? StartFromResumeAt(r) : StartFromParkedOrFirst();
 
         if (auto && Mode == PlayMode.RepeatOne) return c;
 
@@ -188,7 +204,7 @@ public sealed class PlaybackQueue
     private int? ComputePrevious()
     {
         if (Count == 0) return null;
-        if (Current is null) return StartFromParkedOrFirst();
+        if (Current is null) return _resumeAt is { } r ? PreviousFromResumeAt(r) : StartFromParkedOrFirst();
 
         if (_position - 1 >= 0)
         {
@@ -206,6 +222,160 @@ public sealed class PlaybackQueue
 
     /// <summary>供测试观察内部顺序。</summary>
     internal IReadOnlyList<int> CurrentOrder => _order;
+
+    /// <summary>
+    /// <see cref="Current"/> 为 null 时，如果是因为结构性编辑移除了正在播的曲目、引擎还没播完，
+    /// 返回它续播位置对应的列表下标；其余情况（列表为空、已经播到末尾）返回 null
+    /// （T-008 方案 §4.3「确定插入位置」用它判断"引擎还在放一首已经被移除的歌"）。
+    /// </summary>
+    public int? PendingResumeItemIndex => _resumeAt is { } r && r < _order.Count ? _order[r] : null;
+
+    /// <summary>
+    /// 列表发生结构性编辑后调用（T-008 方案 §2.3）。
+    /// <paramref name="map"/>[旧下标] = 新下标，null 表示这一首被移除了；<paramref name="newCount"/> 是新列表的长度；
+    /// <paramref name="added"/> 是新出现的下标，按插入顺序排列；<paramref name="placement"/> 决定新曲目插到哪
+    /// （只在 <paramref name="added"/> 非空时有意义）；<paramref name="relocated"/> 是被挪动过位置的旧下标
+    /// （只在随机模式下起作用，且挪动当前曲目时不需要放进来）。
+    /// </summary>
+    public void ApplyEdit(IReadOnlyList<int?> map, int newCount, IReadOnlyList<int> added,
+        EditPlacement placement, IReadOnlyCollection<int> relocated)
+    {
+        var oldOrder = _order;
+        var oldPosition = _position;
+        var oldCurrent = Current;
+
+        Count = newCount;
+        _order = Mode == PlayMode.Shuffle
+            ? BuildShuffledOrderAfterEdit(oldOrder, oldPosition, oldCurrent, map, added, placement, relocated)
+            : Enumerable.Range(0, newCount).ToList(); // 非随机模式直接按新列表自然序重建；新曲目已经在 Items 里的正确位置上了
+
+        if (oldCurrent is { } cur && cur < map.Count && map[cur] is { } newIndex)
+        {
+            Current = newIndex;
+            _position = _order.IndexOf(newIndex);
+            _resumeAt = null;
+        }
+        else
+        {
+            Current = null;
+            _position = 0;
+            _resumeAt = ComputeResumeAt(oldOrder, oldPosition, map);
+        }
+
+        _parkedIndex = null;
+        IsFinished = false;
+    }
+
+    /// <summary>已经播过 / 还没播过两段分别处理，最后拼起来（T-008 方案 §2.3 的随机模式规则）。</summary>
+    private List<int> BuildShuffledOrderAfterEdit(List<int> oldOrder, int oldPosition, int? oldCurrent,
+        IReadOnlyList<int?> map, IReadOnlyList<int> added, EditPlacement placement, IReadOnlyCollection<int> relocated)
+    {
+        var played = new List<int>();
+        var remaining = new List<int>();
+
+        for (var i = 0; i < oldOrder.Count; i++)
+        {
+            var oldIndex = oldOrder[i];
+            if (oldIndex >= map.Count || map[oldIndex] is not { } newIndex) continue;
+            (i <= oldPosition ? played : remaining).Add(newIndex);
+        }
+
+        // 本轮已经播过、又被挪动的曲目，重新算作「还没播过」，插到剩余部分里的随机位置；
+        // 挪动的是当前曲目本身时不做这一步
+        foreach (var oldIndex in relocated)
+        {
+            if (oldCurrent is { } cur && oldIndex == cur) continue;
+            if (oldIndex >= map.Count || map[oldIndex] is not { } newIndex) continue;
+
+            var oldPosInOrder = oldOrder.IndexOf(oldIndex);
+            if (oldPosInOrder < 0 || oldPosInOrder > oldPosition) continue;
+            if (!played.Remove(newIndex)) continue;
+
+            InsertAtRandomPosition(remaining, newIndex);
+        }
+
+        switch (placement)
+        {
+            case EditPlacement.AfterCurrent:
+                remaining.InsertRange(0, added);
+                break;
+            case EditPlacement.AtStart:
+                played.InsertRange(0, added);
+                break;
+            case EditPlacement.RandomInRemainder:
+                foreach (var newIndex in added) InsertAtRandomPosition(remaining, newIndex);
+                break;
+            case EditPlacement.KeepNatural:
+                break;
+        }
+
+        played.AddRange(remaining);
+        return played;
+    }
+
+    private void InsertAtRandomPosition(List<int> list, int value) =>
+        list.Insert(_random.Next(list.Count + 1), value);
+
+    /// <summary>
+    /// 当前曲目被移除（或本来就没有）时，续播位置：沿着旧顺序表从旧位置往后找第一首还留着的歌，
+    /// 换算成它在新顺序表里的位置；找不到就是新列表的长度（等同「已经播到末尾」）。
+    /// </summary>
+    private int ComputeResumeAt(List<int> oldOrder, int oldPosition, IReadOnlyList<int?> map)
+    {
+        for (var i = oldPosition + 1; i < oldOrder.Count; i++)
+        {
+            var oldIndex = oldOrder[i];
+            if (oldIndex < map.Count && map[oldIndex] is { } newIndex)
+                return _order.IndexOf(newIndex);
+        }
+        return _order.Count;
+    }
+
+    private int? PeekFromResumeAt(int resumeAt)
+    {
+        if (resumeAt < _order.Count) return _order[resumeAt];
+        return Mode switch
+        {
+            PlayMode.Sequential => null,
+            PlayMode.Shuffle => null, // 新一轮的顺序要到真正翻页时才洗出来
+            _ => _order.Count > 0 ? _order[0] : null
+        };
+    }
+
+    private int? StartFromResumeAt(int resumeAt)
+    {
+        _resumeAt = null;
+
+        if (resumeAt < _order.Count)
+        {
+            _position = resumeAt;
+            Current = _order[_position];
+            return Current;
+        }
+
+        if (Mode == PlayMode.Sequential) return null;
+        if (Mode == PlayMode.Shuffle) Reshuffle();
+        _position = 0;
+        Current = _order.Count > 0 ? _order[0] : null;
+        return Current;
+    }
+
+    private int? PreviousFromResumeAt(int resumeAt)
+    {
+        _resumeAt = null;
+
+        if (resumeAt - 1 >= 0)
+        {
+            _position = resumeAt - 1;
+            Current = _order[_position];
+            return Current;
+        }
+
+        if (Mode == PlayMode.Sequential) return null;
+        _position = _order.Count - 1;
+        Current = _order.Count > 0 ? _order[_position] : null;
+        return Current;
+    }
 
     /// <summary>
     /// 没有选中项时该从哪首开始。

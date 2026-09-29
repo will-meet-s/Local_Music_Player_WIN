@@ -30,6 +30,14 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
 
     private List<Track> _library = new();
 
+    // MARK: - T-008 E-2：编辑和自动切歌的竞态
+
+    /// <summary>每次编辑（T-008）都加 1，用来判断预加载的内容是不是被编辑作废了。</summary>
+    private int _listVersion;
+
+    private string? _preloadedPath;
+    private int _preloadVersion;
+
     public PlayerViewModel()
     {
         _preferences = Preferences.Load();
@@ -67,6 +75,10 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
         ToggleSortDirectionCommand = new RelayCommand(() => SortAscending = !SortAscending);
         PlayAtCommand = new RelayCommand<int>(PlayAt);
         PlayNowPlayingAtCommand = new RelayCommand<int>(PlayNowPlayingAt);
+        PlayNextCommand = new RelayCommand<IReadOnlyList<Track>>(PlayNextInNowPlaying);
+        AppendCommand = new RelayCommand<IReadOnlyList<Track>>(AppendToNowPlaying);
+        RemoveFromNowPlayingCommand = new RelayCommand<IReadOnlyList<int>>(RemoveFromNowPlaying);
+        ClearNowPlayingCommand = new RelayCommand(ClearNowPlaying);
     }
 
     // MARK: - 曲库
@@ -432,6 +444,17 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
 
     public bool HasError => !string.IsNullOrEmpty(_errorMessage);
 
+    /// <summary>
+    /// 提示性的文字（T-008），和 <see cref="ErrorMessage"/> 分开。界面用 InfoBar（Informational 级别）
+    /// 显示，3 秒后自动关闭——自动关闭的计时器是界面层的事，这里只负责持有当前要显示的文字。
+    /// </summary>
+    private string? _notice;
+    public string? Notice
+    {
+        get => _notice;
+        set => Set(ref _notice, value);
+    }
+
     /// <summary>桌面歌词窗口的外观设置直接读写这个对象。</summary>
     public Preferences Settings => _preferences;
 
@@ -449,6 +472,10 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
     public RelayCommand ToggleSortDirectionCommand { get; }
     public RelayCommand<int> PlayAtCommand { get; }
     public RelayCommand<int> PlayNowPlayingAtCommand { get; }
+    public RelayCommand<IReadOnlyList<Track>> PlayNextCommand { get; }
+    public RelayCommand<IReadOnlyList<Track>> AppendCommand { get; }
+    public RelayCommand<IReadOnlyList<int>> RemoveFromNowPlayingCommand { get; }
+    public RelayCommand ClearNowPlayingCommand { get; }
 
     // MARK: - 曲库扫描
 
@@ -682,6 +709,76 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
         StartCurrent();
     }
 
+    // MARK: - T-008：播放列表编辑
+
+    /// <summary>下一首播放（FR-004）。<paramref name="tracks"/> 必须已经按列表里的上下顺序排好（界面层用 SelectionOrder.ByListOrder）。</summary>
+    public void PlayNextInNowPlaying(IReadOnlyList<Track> tracks)
+    {
+        var result = NowPlaying.PlayNext(tracks, PlayingTrack);
+        if (result.Relocated > 0) Notice = "已调整到下一首";
+        ApplyEditSideEffects(result);
+    }
+
+    /// <summary>加到播放列表末尾（FR-005）。</summary>
+    public void AppendToNowPlaying(IReadOnlyList<Track> tracks)
+    {
+        var result = NowPlaying.Append(tracks, PlayingTrack);
+        if (result.Relocated > 0) Notice = $"有 {result.Relocated} 首已在播放列表中，已调整到末尾";
+        ApplyEditSideEffects(result);
+    }
+
+    /// <summary>从播放列表移除（FR-006）。</summary>
+    public void RemoveFromNowPlaying(IReadOnlyList<int> indices) => ApplyEditSideEffects(NowPlaying.Remove(indices));
+
+    /// <summary>拖动排序时调用（FR-007）。</summary>
+    public void MoveInNowPlaying(int from, int to) => ApplyEditSideEffects(NowPlaying.Move(from, to));
+
+    /// <summary>清空播放列表（FR-008）。</summary>
+    public void ClearNowPlaying()
+    {
+        NowPlaying.Clear();
+        UnloadBecauseNoCurrent();
+        _listVersion++;
+        _engine.InvalidatePreload();
+    }
+
+    /// <summary>
+    /// 编辑操作共同的收尾：让预加载判断（E-2）能感知到列表变了；
+    /// 编辑后没有当前曲目就停下来，不自动开始播放；否则只是同步一下高亮（当前曲目可能被挪动了位置）。
+    /// </summary>
+    private void ApplyEditSideEffects(EditResult result)
+    {
+        _listVersion++;
+        _engine.InvalidatePreload();
+
+        if (result.NoCurrentAfter)
+        {
+            UnloadBecauseNoCurrent();
+            return;
+        }
+
+        if (NowPlaying.Queue.Current is { } idx && idx >= 0 && idx < NowPlaying.Items.Count)
+        {
+            NowPlayingIndex = idx;
+            CurrentIndex = IndexOfPath(NowPlaying.Items[idx].Path);
+        }
+    }
+
+    /// <summary>编辑后队列没有当前曲目：停止播放，不自动从头开始（FR-004 ⑤、FR-005、FR-008）。</summary>
+    private void UnloadBecauseNoCurrent()
+    {
+        _engine.Unload();
+        PlayingTrack = null;
+        PlayingTrackMissing = false;
+        CurrentIndex = -1;
+        NowPlayingIndex = -1;
+        CurrentTime = 0;
+        Duration = 0;
+        Lyrics = Array.Empty<LyricLine>();
+        CurrentLyricIndex = -1;
+        IsPlaying = false;
+    }
+
     public void TogglePlayPause()
     {
         if (_playingTrack is null)
@@ -759,15 +856,31 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
     /// <summary>引擎已无缝推进到下一首，这里只需把界面状态跟上。</summary>
     private void HandleAutoAdvance(PlayableItem item)
     {
+        // E-2：编辑发生在音频线程切歌之后、这里执行之前——引擎预加载的这首已经被作废了。
+        // 必须在调用 Queue.Next 之前就判断"预加载时的版本是不是还是当前版本"，
+        // 因为 Queue.Next 本身会推进队列、改变后续的判断依据。
+        var preloadWasInvalidatedByEdit = NowPlaying.State == NowPlayingState.Independent &&
+            _preloadedPath is { } preloadedPath && TrackIdentity.AreSame(preloadedPath, item.Path) &&
+            _preloadVersion != _listVersion;
+
         // 推进播放队列。正常情况它给出的就是引擎已经切到的那首；
         // 若期间播放列表被编辑过，就按路径重新对齐（下标现在指 NowPlaying.Items）。
         var expected = NowPlaying.Queue.Next(auto: true);
         var items = NowPlaying.Items;
 
-        int index;
-        if (expected is { } e && e >= 0 && e < items.Count && TrackIdentity.AreSame(items[e].Path, item.Path))
+        var matchesExpected = expected is { } e && e >= 0 && e < items.Count && TrackIdentity.AreSame(items[e].Path, item.Path);
+
+        if (preloadWasInvalidatedByEdit && !matchesExpected)
         {
-            index = e;
+            System.Diagnostics.Debug.WriteLine("[NowPlaying] preload invalidated by edit");
+            LoadQueueCurrentOrStop(expected, items);
+            return;
+        }
+
+        int index;
+        if (matchesExpected)
+        {
+            index = expected!.Value;
         }
         else
         {
@@ -787,6 +900,33 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
         IsPlaying = true;
         _consecutiveFailures = 0;
         UpdatePlayingTrackMissing();
+    }
+
+    /// <summary>
+    /// E-2：预加载的内容被编辑作废时，立即加载队列现在真正给出的那一首（不是无缝切歌）。
+    /// <paramref name="queueGivenIndex"/> 是已经推进过的 <c>Queue.Next(auto: true)</c> 的结果。
+    /// </summary>
+    private void LoadQueueCurrentOrStop(int? queueGivenIndex, IReadOnlyList<Track> items)
+    {
+        if (queueGivenIndex is not { } index || index < 0 || index >= items.Count)
+        {
+            Stop();
+            NowPlayingIndex = -1;
+            return;
+        }
+
+        var track = items[index];
+        NowPlayingIndex = index;
+        CurrentIndex = IndexOfPath(track.Path);
+        PlayingTrack = track;
+        PlayingTrackMissing = false;
+        CurrentTime = 0;
+        Duration = track.Duration;
+        RefreshLyrics(track);
+
+        _engine.Load(ToPlayable(track));
+        IsPlaying = _engine.IsPlaying;
+        _consecutiveFailures = 0;
     }
 
     /// <summary>在 <see cref="NowPlaying"/>.Items 里按路径定位，用于自动切歌时重新对齐队列。</summary>
@@ -845,7 +985,12 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
         {
             if (NowPlaying.Queue.PeekNext(auto: true) is not { } index) return null;
             if (index < 0 || index >= NowPlaying.Items.Count) return null;
-            return ToPlayable(NowPlaying.Items[index]);
+
+            var track = NowPlaying.Items[index];
+            // E-2：记下预加载的是哪首、当时的列表版本，供 HandleAutoAdvance 判断编辑有没有作废它
+            _preloadedPath = track.Path;
+            _preloadVersion = _listVersion;
+            return ToPlayable(track);
         };
 
         _engine.Advanced += HandleAutoAdvance;

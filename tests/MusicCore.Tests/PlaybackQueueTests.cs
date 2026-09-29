@@ -394,4 +394,81 @@ public class PlaybackQueueTests
 
         Assert.Equal(1, q.Current);
     }
+
+    // ApplyEdit（T-008，方案 v4 §2.3）
+
+    [Fact]
+    public void ApplyEdit_CurrentSurvives_RemapsToNewIndex()
+    {
+        var q = new PlaybackQueue(5, PlayMode.Sequential);
+        q.Select(2);
+
+        // 移除下标 0，其余依次前移一位：旧下标 2 的当前曲目变成新下标 1
+        var map = new int?[] { null, 0, 1, 2, 3 };
+        q.ApplyEdit(map, newCount: 4, added: Array.Empty<int>(), EditPlacement.KeepNatural, relocated: Array.Empty<int>());
+
+        Assert.Equal(1, q.Current);
+        Assert.False(q.IsFinished);
+    }
+
+    [Fact]
+    public void ApplyEdit_CurrentRemoved_SetsPendingResumeToNextSurvivor()
+    {
+        var q = new PlaybackQueue(5, PlayMode.Sequential);
+        q.Select(2);
+
+        // 移除下标 2、3，剩下 0,1,4 -> 新下标 0,1,2
+        var map = new int?[] { 0, 1, null, null, 2 };
+        q.ApplyEdit(map, newCount: 3, added: Array.Empty<int>(), EditPlacement.KeepNatural, relocated: Array.Empty<int>());
+
+        Assert.Null(q.Current);
+        Assert.Equal(2, q.PendingResumeItemIndex);
+
+        Assert.Equal(2, q.Next(auto: true));
+        Assert.Null(q.PendingResumeItemIndex); // 用过一次之后清掉
+    }
+
+    [Fact]
+    public void ApplyEdit_CurrentRemovedWithNoSurvivorAfter_SequentialStops()
+    {
+        var q = new PlaybackQueue(3, PlayMode.Sequential);
+        q.Select(2); // 最后一首
+
+        var map = new int?[] { 0, 1, null };
+        q.ApplyEdit(map, newCount: 2, added: Array.Empty<int>(), EditPlacement.KeepNatural, relocated: Array.Empty<int>());
+
+        Assert.Null(q.Current);
+        Assert.Null(q.PendingResumeItemIndex); // 已经没有可续播的
+        Assert.Null(q.Next(auto: true));
+    }
+
+    [Fact]
+    public void ApplyEdit_AlwaysClearsIsFinished()
+    {
+        var q = new PlaybackQueue(3, PlayMode.Sequential);
+        q.Select(0);
+        q.Next(auto: true);
+        q.Next(auto: true);
+        Assert.Null(q.Next(auto: true));
+        Assert.True(q.IsFinished);
+
+        var map = new int?[] { 0, 1, 2 };
+        q.ApplyEdit(map, newCount: 3, added: Array.Empty<int>(), EditPlacement.KeepNatural, relocated: Array.Empty<int>());
+
+        Assert.False(q.IsFinished);
+    }
+
+    [Fact]
+    public void ApplyEdit_ShuffleMode_AfterCurrentPlacement_InsertsInGivenOrderRightAfterCurrent()
+    {
+        var q = new PlaybackQueue(4, PlayMode.Shuffle);
+        q.Select(0);
+        q.Next(auto: true); // 走一步，模拟"已经播过一首"
+
+        var map = new int?[] { 0, 1, 2, 3 };
+        q.ApplyEdit(map, newCount: 6, added: new[] { 4, 5 }, EditPlacement.AfterCurrent, relocated: Array.Empty<int>());
+
+        Assert.Equal(4, q.Next(auto: true));
+        Assert.Equal(5, q.Next(auto: true));
+    }
 }
