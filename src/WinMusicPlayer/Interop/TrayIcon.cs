@@ -271,8 +271,10 @@ internal sealed class TrayIcon : IDisposable
         var menu = CreatePopupMenu();
 
         var track = _viewModel.PlayingTrack;
+        // 先按原文截断（和基线的截断位置一致），再转义 &；顺序反过来的话，转义后
+        // 多出来的字符会偏移截断点，还可能把截断点切在 && 中间，导致「…」被误当成快捷键
         var nowPlayingText = track is not null
-            ? Truncate(EscapeAmpersand($"{track.Title} — {track.Subtitle}"), 42)
+            ? EscapeAmpersand(Truncate($"{track.Title} — {track.Subtitle}", 42))
             : "未在播放";
 
         AppendMenuW(menu, MfString | MfGrayed, (UIntPtr)CmdNowPlaying, nowPlayingText);
