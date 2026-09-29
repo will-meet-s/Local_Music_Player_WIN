@@ -59,10 +59,17 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    /// T-001 还没有托盘：关窗就是退出。T-009 会把这里改成取消关闭 + AppWindow.Hide()。
+    /// 关窗不退出：取消关闭并隐藏窗口，托盘图标还在，播放继续。真正退出走托盘菜单的
+    /// 「退出」→ App.Quit()，那时 IsQuitting 已经是 true，这里不会再取消。
     /// </summary>
-    private void OnAppWindowClosing(AppWindow sender, AppWindowClosingEventArgs args) =>
-        ((App)Application.Current).Quit();
+    private void OnAppWindowClosing(AppWindow sender, AppWindowClosingEventArgs args)
+    {
+        if (!((App)Application.Current).IsQuitting)
+        {
+            args.Cancel = true;
+            sender.Hide();
+        }
+    }
 
     private void OnDismissError(object sender, RoutedEventArgs e) => ViewModel.ErrorMessage = null;
 

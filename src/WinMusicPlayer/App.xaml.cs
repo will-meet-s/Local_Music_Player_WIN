@@ -1,4 +1,6 @@
 using System.ComponentModel;
+using System.Runtime.InteropServices;
+using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using MusicCore.ViewModels;
 using WinMusicPlayer.Interop;
@@ -7,6 +9,9 @@ namespace WinMusicPlayer;
 
 public partial class App : Application
 {
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
+
     private readonly List<Action> _shutdownActions = new();
     private bool _quitting;
     private DesktopLyricsWindow? _lyricsWindow;
@@ -14,10 +19,22 @@ public partial class App : Application
     internal static PlayerViewModel ViewModel { get; private set; } = null!;
     internal static MainWindow MainWindow { get; private set; } = null!;
 
+    internal bool IsQuitting => _quitting;
+
     /// <summary>窗口没开时返回 false，这是基线的行为——托盘菜单在桌面歌词关着时不会读到这个值。</summary>
     internal bool IsLyricsLocked => _lyricsWindow?.IsLocked ?? false;
 
     internal void ToggleLyricsLock() => _lyricsWindow?.SetLocked(!IsLyricsLocked);
+
+    /// <summary>主窗口只创建一次，关窗只是隐藏，所以这里不需要像基线那样重建窗口。</summary>
+    internal void ShowMainWindow()
+    {
+        var appWindow = MainWindow.AppWindow;
+        appWindow.Show();
+        if (appWindow.Presenter is OverlappedPresenter { State: OverlappedPresenterState.Minimized } p) p.Restore();
+        MainWindow.Activate();
+        SetForegroundWindow(MainWindow.Hwnd);   // 托盘刚处理完点击，这时有前台权限，能把窗口真正带到最前面
+    }
 
     public App()
     {
@@ -41,6 +58,8 @@ public partial class App : Application
         MainWindow = new MainWindow();
         MainWindow.Activate();
 
+        var tray = new TrayIcon(ViewModel, ShowMainWindow, ToggleLyricsLock, () => IsLyricsLocked, Quit);
+        RegisterShutdown(tray.Dispose);
         RegisterShutdown(CloseDesktopLyrics);
 
         // 顺序 6
