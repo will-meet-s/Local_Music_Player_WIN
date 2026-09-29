@@ -1,6 +1,6 @@
 # WinMusicPlayer
 
-Windows 本地音乐播放器。C# + WPF (.NET 10)，与 [MacMusicPlayer](https://github.com/will-meet-s/Local_Music_Player_MAC)
+Windows 本地音乐播放器。C# + WinUI 3（Windows App SDK 1.7，.NET 10），与 [MacMusicPlayer](https://github.com/will-meet-s/Local_Music_Player_MAC)
 功能对齐，另加**桌面歌词**。
 
 ## 功能
@@ -21,7 +21,8 @@ Windows 本地音乐播放器。C# + WPF (.NET 10)，与 [MacMusicPlayer](https:
 ## 环境要求
 
 - Windows 10 1809+（FLAC / ALAC 解码依赖系统自带的 Media Foundation 解码器）
-- .NET 10 SDK（开发）/ .NET 10 桌面运行时（运行）
+- 开发：.NET 10 SDK。WinUI 3 工程只能在 Windows 上编译；团队的 CI 在 GitHub Actions 的 Windows 机器上构建和跑单测
+- 运行：不需要预先安装 .NET 或 Windows App SDK 运行时，发布产物是自包含的
 
 ## 构建运行
 
@@ -47,6 +48,8 @@ dotnet publish src\WinMusicPlayer -p:PublishProfile=win-x64
 |---|---|
 | [NAudio](https://github.com/naudio/NAudio) | 音频解码与 WASAPI 输出 |
 | [TagLibSharp](https://github.com/mono/taglib-sharp) | 标签读取：ID3v2 / Vorbis Comment / MP4 atom / APE |
+| Microsoft.WindowsAppSDK（1.7.250310001） | WinUI 3 界面、窗口与系统背景材质，以自包含方式随程序发布 |
+| Microsoft.Windows.SDK.BuildTools（10.0.26100.1742） | 构建时用到的 Windows SDK 工具 |
 
 读旧版中文 `.lrc` 需要的 GB18030 编码由框架自带的 `CodePagesEncodingProvider` 提供
 （.NET 10 已内置，不再需要 `System.Text.Encoding.CodePages` 包引用）。
@@ -129,8 +132,8 @@ WASAPI Exclusive 模式：绕过系统混音器，用文件原生采样率直推
 
 | macOS | Windows | 说明 |
 |---|---|---|
-| `NSVisualEffectView` 磨砂 | DWM 亚克力 | 需 Win11 22H2+；更早的系统退化为半透明纯色，功能不受影响 |
-| 菜单栏状态项 | 系统托盘 | 用 WinForms `NotifyIcon`，右键菜单而非弹出面板 |
+| `NSVisualEffectView` 磨砂 | WinUI 3 亚克力（`DesktopAcrylicBackdrop`） | 需 Win11 22H2+；更早的系统退化为不透明纯色，功能不受影响 |
+| 菜单栏状态项 | 系统托盘 | 用 Win32 `Shell_NotifyIcon`，右键菜单而非弹出面板 |
 | CoreAudio 采样率匹配 | WASAPI 独占模式 | Windows 上的对应做法 |
 | 自研 FLAC Vorbis Comment 解析 | 删除 | TagLib# 原生支持，不必手写 |
 | `⌘Q` 等快捷键 | 删除 | macOS 版实测未生效，不移植 |
@@ -141,7 +144,7 @@ WASAPI Exclusive 模式：绕过系统混音器，用文件原生采样率直推
 
 ```
 src/
-  MusicCore/                    纯逻辑 + 播放引擎，不引用 WPF
+  MusicCore/                    纯逻辑 + 播放引擎，不引用任何界面框架
     Models/                     Track / LyricLine / PlayMode / NowPlayingLayout
     Library/                    LibraryScanner、NaturalStringComparer、
                                 MetadataLoader（TagLib#）、TrackFilter（搜索排序）
@@ -150,19 +153,26 @@ src/
                                 AudioSource、GaplessSampleProvider、PlayerEngine
     Support/                    Preferences（JSON）、TimeFormat
     ViewModels/                 PlayerViewModel（UI 唯一数据源）
-  WinMusicPlayer/               WPF 外壳
+  WinMusicPlayer/               WinUI 3 外壳（非打包、自包含）
     Views/                      TrackListView / NowPlayingView / LyricsView /
-                                ControlsBar / SettingsPanel / LayoutThumbnail
-    Interop/                    WindowBackdrop（亚克力）、ClickThrough（鼠标穿透）
+                                ControlsBar / SettingsPanel / LayoutThumbnail /
+                                ViewFormat（x:Bind 用的格式化函数）
+    Themes/                     Colors.xaml（配色与按钮样式）
+    Interop/                    WindowBackdrop（亚克力、深色标题栏）、WindowSizing、
+                                TransparentBackdrop / ClickThrough / TextOutline（桌面歌词）、
+                                TrayIcon（托盘）、NativeMessageBox
     DesktopLyricsWindow         桌面歌词浮层
-    TrayIcon                    托盘常驻
-tests/MusicCore.Tests/          LrcParser / PlaybackQueue / TrackFilter /
-                                ReplayGain / LibraryScanner / LyricsProvider
+    CrashLog                    崩溃与诊断日志
+tests/MusicCore.Tests/          LrcParser / PlaybackQueue / TrackFilter / ReplayGain /
+                                LibraryScanner / LyricsProvider / PlayerEngineGapless /
+                                Preferences
+.github/workflows/build.yml     CI：Windows 上构建、单测、发布单文件
 ```
 
-`PlaybackQueue`、`LrcParser`、`TrackFilter`、`ReplayGain`、`NaturalStringComparer`
-都是不碰音频设备的纯逻辑，可完整单测；`PlayerEngine`、`MetadataLoader` 依赖真实音频文件
-与输出设备，由手动验收覆盖。
+`PlaybackQueue`、`LrcParser`、`TrackFilter`、`ReplayGain`、`NaturalStringComparer`、
+`Preferences`（配置文件格式）都是不碰音频设备的纯逻辑，可以完整单测；`PlayerEngine`
+的无缝切歌由 `PlayerEngineGaplessTests` 用假输出设备覆盖；`MetadataLoader` 和真实的
+音频输出依赖真实文件和设备，由手动验收覆盖。界面层不写单测，由测试用例在 Windows 上验收。
 
 ## 已知限制
 
@@ -170,3 +180,5 @@ tests/MusicCore.Tests/          LrcParser / PlaybackQueue / TrackFilter /
 - 桌面歌词不支持逐字卡拉 OK 效果（需要增强型 LRC，普通 `.lrc` 没有这个信息）
 - WAV 没有标准歌词标签，只能靠同名 `.lrc`
 - 未做代码签名，SmartScreen 首次运行会提示「未知发布者」，点「仍要运行」即可
+- Windows 10 默认没有 Segoe Fluent Icons 字体，播放 / 暂停按钮的图标会显示为空白（基线的 WPF 版也是这样）
+- 多块显示器的缩放比例不同时，桌面歌词恢复后的位置可能有少许偏移
