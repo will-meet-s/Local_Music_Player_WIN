@@ -1,4 +1,5 @@
 ﻿using System.ComponentModel;
+using MusicCore.Library;
 using MusicCore.Playback;
 
 namespace MusicCore.Models;
@@ -18,6 +19,7 @@ public sealed class Track : IEquatable<Track>, INotifyPropertyChanged
     public Track(string path)
     {
         Path = path;
+        IdentityKey = TrackIdentity.Normalize(path);
         Title = System.IO.Path.GetFileNameWithoutExtension(path);
     }
 
@@ -34,8 +36,12 @@ public sealed class Track : IEquatable<Track>, INotifyPropertyChanged
         return true;
     }
 
-    /// <summary>完整文件路径，同时用作唯一标识。</summary>
+    /// <summary>完整文件路径，用于显示和打开文件 —— 不要替换成规范化后的结果，
+    /// 否则歌词侧车文件（<see cref="Library.LyricsProvider"/> 按路径查找 .lrc）和界面显示会跟着变。</summary>
     public string Path { get; }
+
+    /// <summary>规范化后的路径，用作相等性判断（FR-026，见 <see cref="TrackIdentity"/>）。</summary>
+    internal string IdentityKey { get; }
 
     private string _title = "";
     public string Title
@@ -101,9 +107,9 @@ public sealed class Track : IEquatable<Track>, INotifyPropertyChanged
 
     // 路径即身份 —— 元数据变化不应影响相等性判断，否则列表里的曲目会「换了一首」
     public bool Equals(Track? other) =>
-        other is not null && string.Equals(Path, other.Path, StringComparison.OrdinalIgnoreCase);
+        other is not null && string.Equals(IdentityKey, other.IdentityKey, StringComparison.OrdinalIgnoreCase);
 
     public override bool Equals(object? obj) => Equals(obj as Track);
 
-    public override int GetHashCode() => StringComparer.OrdinalIgnoreCase.GetHashCode(Path);
+    public override int GetHashCode() => StringComparer.OrdinalIgnoreCase.GetHashCode(IdentityKey);
 }

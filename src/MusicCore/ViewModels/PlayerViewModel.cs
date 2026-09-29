@@ -462,7 +462,7 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
             var paths = await Task.Run(() => LibraryScanner.Scan(folder));
 
             // 复用已有条目，避免重扫时把整库的元数据全部重读一遍
-            var known = _library.ToDictionary(t => t.Path, StringComparer.OrdinalIgnoreCase);
+            var known = _library.ToDictionary(t => t.Path, TrackIdentity.Comparer);
             _library = paths
                 .Select(p => known.TryGetValue(p, out var existing) ? existing : new Track(p))
                 .ToList();
@@ -595,7 +595,7 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
     private int IndexOfPath(string path)
     {
         for (var i = 0; i < Tracks.Count; i++)
-            if (string.Equals(Tracks[i].Path, path, StringComparison.OrdinalIgnoreCase))
+            if (TrackIdentity.AreSame(Tracks[i].Path, path))
                 return i;
         return -1;
     }
@@ -613,8 +613,7 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
             return;
         }
 
-        PlayingTrackMissing = !_library.Any(
-            t => string.Equals(t.Path, track.Path, StringComparison.OrdinalIgnoreCase));
+        PlayingTrackMissing = !_library.Any(t => TrackIdentity.AreSame(t.Path, track.Path));
     }
 
     // MARK: - 播放控制
@@ -708,7 +707,7 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
         var actual = IndexOfPath(item.Path);
 
         if (expected is { } e && e >= 0 && e < Tracks.Count &&
-            string.Equals(Tracks[e].Path, item.Path, StringComparison.OrdinalIgnoreCase))
+            TrackIdentity.AreSame(Tracks[e].Path, item.Path))
         {
             CurrentIndex = e;
         }
@@ -725,8 +724,7 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
 
         var track = CurrentIndex >= 0
             ? Tracks[CurrentIndex]
-            : _library.FirstOrDefault(t =>
-                  string.Equals(t.Path, item.Path, StringComparison.OrdinalIgnoreCase))
+            : _library.FirstOrDefault(t => TrackIdentity.AreSame(t.Path, item.Path))
               ?? new Track(item.Path);
 
         PlayingTrack = track;
