@@ -2,7 +2,6 @@ using System.Runtime.InteropServices;
 using Microsoft.UI.Composition;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media;
-using Windows.System;
 
 namespace WinMusicPlayer.Interop;
 
@@ -46,7 +45,8 @@ internal sealed class TransparentBackdrop : SystemBackdrop
     /// <summary>Windows.UI.Composition 要求当前线程上有 Windows.System 的 DispatcherQueue。</summary>
     private static void EnsureSystemDispatcherQueue()
     {
-        if (DispatcherQueue.GetForCurrentThread() is not null) return;
+        // 写全名：本类继承自 DependencyObject，裸写 DispatcherQueue 会解析成继承来的实例属性
+        if (Windows.System.DispatcherQueue.GetForCurrentThread() is not null) return;
 
         var options = new DispatcherQueueOptions
         {
