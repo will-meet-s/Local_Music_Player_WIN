@@ -126,7 +126,9 @@
             <Border Grid.Row="4" Height="1" Background="{StaticResource SeparatorBrush}" />
 
             <!-- T-004：播放控制栏 -->
-            <Border x:Name="ControlsHost" Grid.Row="5" />
+            <Border x:Name="ControlsHost" Grid.Row="5">
+                <views:ControlsBar />
+            </Border>
         </Grid>
     </Grid>
 </Window>

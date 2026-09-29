@@ -35,4 +35,10 @@
         <Setter Property="CornerRadius" Value="5" />
     </Style>
 
+    <!-- 播放/暂停主按钮，比其余传输键大一号。契约：以后的主按钮都用它 -->
+    <Style x:Key="PrimaryIconButton" TargetType="Button" BasedOn="{StaticResource IconButton}">
+        <Setter Property="FontSize" Value="30" />
+        <Setter Property="Padding" Value="6" />
+    </Style>
+
 </ResourceDictionary>

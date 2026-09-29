@@ -21,4 +21,8 @@ internal static class ViewFormat
     public static string SortTip(bool ascending) => ascending ? "升序" : "降序";
 
     public static string MatchCount(int count) => $"匹配 {count} 首";
+
+    public static string PlayPauseGlyph(bool isPlaying) => isPlaying ? "\uF8AE" : "\uF5B0";
+
+    public static string PlayPauseTip(bool isPlaying) => isPlaying ? "暂停" : "播放";
 }
