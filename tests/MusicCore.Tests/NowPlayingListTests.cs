@@ -125,6 +125,29 @@ public class NowPlayingListTests
     }
 
     [Fact]
+    public void SyncFromLibrary_AfterSequentialPlaybackFinished_KeepsIsFinishedTrue()
+    {
+        // v4 修复 M-2 ②：跟随状态下顺序播放到末尾后再排序/搜索，SyncFromLibrary 用 Realign
+        // 重新对齐当前曲目，不能像 Select 那样把 IsFinished 误清掉，否则 T-008 的
+        // 「下一首播放」会判错插入位置（FR-004 ⑤）。
+        var list = new NowPlayingList(PlayMode.Sequential);
+        var tracks = MakeTracks(3);
+        list.PlayFromLibrary(tracks, 0);
+        list.Queue.Next(auto: true);
+        list.Queue.Next(auto: true);
+        Assert.Null(list.Queue.Next(auto: true));
+        Assert.True(list.Queue.IsFinished);
+
+        // 模拟排序：正在播放（下标 2）的曲目挪到了新列表的下标 1
+        var playing = tracks[2];
+        var reordered = new[] { tracks[1], tracks[2], tracks[0] };
+        list.SyncFromLibrary(reordered, playing, previousIndex: 2);
+
+        Assert.Equal(1, list.Queue.Current);
+        Assert.True(list.Queue.IsFinished);
+    }
+
+    [Fact]
     public void SyncFromLibrary_ReplacesItemsWithSingleResetEvent()
     {
         var list = new NowPlayingList(PlayMode.Sequential);

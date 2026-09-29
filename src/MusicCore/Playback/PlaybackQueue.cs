@@ -38,8 +38,9 @@ public sealed class PlaybackQueue
 
     /// <summary>
     /// 顺序播放模式下已经放到末尾（<see cref="Next"/> 返回了 null）。
-    /// 之后任何一次 <see cref="Select"/>、<see cref="Next"/> 成功，都会把它清掉
-    /// （T-001 设计方案 §2.3；<c>ApplyEdit</c> 清除它是 T-008 的事）。
+    /// 置为 false 的时机只有四种：<see cref="Select"/>、<see cref="Next"/> 或
+    /// <see cref="Previous"/> 返回非 null、<c>ApplyEdit</c> 执行（T-008 设计方案 §2.3 v4）。
+    /// <see cref="Realign"/> 不在其中 —— 对齐只是列表变了，不代表用户又开始播放了。
     /// </summary>
     public bool IsFinished { get; private set; }
 
@@ -65,11 +66,24 @@ public sealed class PlaybackQueue
     /// <summary>用户直接点选某首歌。</summary>
     public void Select(int index)
     {
-        if (index < 0 || index >= Count) return;
+        if (!SelectCore(index)) return;
+        IsFinished = false;
+    }
+
+    /// <summary>
+    /// 跟随曲库状态下，搜索、排序、刷新之后重新对齐当前曲目用。
+    /// 效果与 <see cref="Select"/> 相同，只是<b>不清除</b> <see cref="IsFinished"/>：
+    /// 对齐只是列表变了，并不代表用户又开始播放了（T-001 设计方案 v4 §2.3）。
+    /// </summary>
+    public void Realign(int index) => SelectCore(index);
+
+    private bool SelectCore(int index)
+    {
+        if (index < 0 || index >= Count) return false;
         Current = index;
         _position = Math.Max(0, _order.IndexOf(index));
         _parkedIndex = null;
-        IsFinished = false;
+        return true;
     }
 
     /// <summary>清除当前选中项，下一次 <see cref="Next"/> 从顺序表头部重新开始。</summary>
@@ -165,6 +179,13 @@ public sealed class PlaybackQueue
 
     /// <summary>上一首。顺序播放停在第一首，其余模式环绕到末尾。</summary>
     public int? Previous()
+    {
+        var result = ComputePrevious();
+        if (result is not null) IsFinished = false;
+        return result;
+    }
+
+    private int? ComputePrevious()
     {
         if (Count == 0) return null;
         if (Current is null) return StartFromParkedOrFirst();

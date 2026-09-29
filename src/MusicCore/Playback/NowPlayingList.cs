@@ -52,7 +52,11 @@ public sealed class NowPlayingList
     /// <summary>
     /// 跟随状态下由 <see cref="ViewModels.PlayerViewModel"/> 的 <c>RebuildDisplayed</c> 调用，
     /// 行为与基线的同步逻辑一模一样：整体替换 <see cref="Items"/>（只触发一次 Reset）→
-    /// 同步队列长度 → 当前曲目还在就选中，不在就停靠在 <paramref name="previousIndex"/> 或清空选中。
+    /// 同步队列长度 → 当前曲目还在就重新对齐，不在就停靠在 <paramref name="previousIndex"/> 或清空选中。
+    /// <para>
+    /// 对齐用 <see cref="PlaybackQueue.Realign"/> 而不是 <c>Select</c>：这里只是列表变了，
+    /// 不代表用户又开始播放了，不能把 <see cref="PlaybackQueue.IsFinished"/> 误清掉（v4 修复 M-2）。
+    /// </para>
     /// </summary>
     public void SyncFromLibrary(IReadOnlyList<Track> displayed, Track? playing, int previousIndex)
     {
@@ -62,7 +66,7 @@ public sealed class NowPlayingList
         var index = playing is null ? -1 : IndexOfPath(playing.Path);
 
         if (index >= 0)
-            Queue.Select(index);
+            Queue.Realign(index);
         else if (previousIndex >= 0)
             Queue.Park(previousIndex);
         else

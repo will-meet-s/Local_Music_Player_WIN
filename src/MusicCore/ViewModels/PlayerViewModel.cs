@@ -767,8 +767,7 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
         NowPlayingIndex = index;
         CurrentIndex = IndexOfPath(item.Path);
 
-        // 独立状态下，正在放的歌可能不在曲库里（例如来自歌单），这时退回构造一个临时 Track
-        var track = index >= 0 ? items[index] : new Track(item.Path);
+        var track = ResolveAdvancedTrack(items, index, _library, item.Path);
 
         PlayingTrack = track;
         CurrentTime = 0;
@@ -788,6 +787,23 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
                 return i;
         return -1;
     }
+
+    /// <summary>
+    /// 自动切歌时，队列给出的下标在 <paramref name="items"/> 里找不到该显示谁（v4 修复 M-1）。
+    /// <para>
+    /// 先在 <paramref name="items"/> 里找（<paramref name="index"/> 有效就直接用）；
+    /// 再退回 <paramref name="library"/>——跟随状态下，引擎切到的这首恰好被搜索过滤掉了，
+    /// 但仍在曲库里，要用曲库里已经加载好元数据的那个对象，否则标题会变回文件名、
+    /// 内嵌歌词和 ReplayGain 也会丢失（基线原有行为，FR-003 要求保持一致）；
+    /// 都找不到（例如来自歌单的独立状态）才新建一个没有元数据的 <see cref="Track"/>。
+    /// </para>
+    /// <para>拆成静态方法是为了不依赖播放引擎就能单测这条分支（<c>internal</c> 供测试调用）。</para>
+    /// </summary>
+    internal static Track ResolveAdvancedTrack(IReadOnlyList<Track> items, int index, IReadOnlyList<Track> library, string path) =>
+        index >= 0
+            ? items[index]
+            : library.FirstOrDefault(t => TrackIdentity.AreSame(t.Path, path))
+              ?? new Track(path);
 
     /// <summary>组装引擎需要的播放条目：路径 + 归一化增益 + 采样率。</summary>
     private PlayableItem ToPlayable(Track track)

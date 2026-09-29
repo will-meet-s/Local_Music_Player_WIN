@@ -350,4 +350,48 @@ public class PlaybackQueueTests
         Assert.Equal(1, q.Next(auto: true));
         Assert.False(q.IsFinished);
     }
+
+    // v4 修复 M-2：Previous 成功要清除 IsFinished；Realign 不清除
+
+    [Fact]
+    public void IsFinished_ClearedByPreviousSucceeding()
+    {
+        var q = new PlaybackQueue(3, PlayMode.Sequential);
+        q.Select(0);
+        q.Next(auto: true);
+        q.Next(auto: true);
+        Assert.Null(q.Next(auto: true));
+        Assert.True(q.IsFinished);
+
+        Assert.Equal(1, q.Previous());
+
+        Assert.False(q.IsFinished);
+    }
+
+    [Fact]
+    public void Realign_DoesNotClearIsFinished()
+    {
+        var q = new PlaybackQueue(3, PlayMode.Sequential);
+        q.Select(0);
+        q.Next(auto: true);
+        q.Next(auto: true);
+        Assert.Null(q.Next(auto: true));
+        Assert.True(q.IsFinished);
+
+        q.Realign(1);
+
+        Assert.Equal(1, q.Current);
+        Assert.True(q.IsFinished);
+    }
+
+    [Fact]
+    public void Realign_OutOfRangeIndex_DoesNothing()
+    {
+        var q = new PlaybackQueue(3, PlayMode.Sequential);
+        q.Select(1);
+
+        q.Realign(99);
+
+        Assert.Equal(1, q.Current);
+    }
 }
