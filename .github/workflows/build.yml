@@ -39,8 +39,11 @@ jobs:
       - name: 检查单文件发布目录只有一个 exe（FR-012 ①）
         shell: pwsh
         run: |
-          $files = @(Get-ChildItem publish/win-x64 -Recurse -File)
+          $root  = (Resolve-Path publish/win-x64).Path
+          $files = @(Get-ChildItem $root -Recurse -File)
+          $list  = ($files | ForEach-Object { "{0} ({1} bytes)" -f $_.FullName.Substring($root.Length + 1), $_.Length }) -join ' | '
           $files | ForEach-Object { "{0,12}  {1}" -f $_.Length, $_.FullName }
+          Write-Output "::notice title=单文件发布目录（共 $($files.Count) 个文件）::$list"
           if ($files.Count -ne 1 -or $files[0].Name -ne 'WinMusicPlayer.exe') {
             throw "单文件发布目录里有 $($files.Count) 个文件，不是只有一个 WinMusicPlayer.exe"
           }
