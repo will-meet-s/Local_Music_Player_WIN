@@ -221,12 +221,20 @@ internal sealed partial class SonglistStore
         try { File.Delete(path); } catch (IOException) { /* 下次启动清理时再试 */ }
     }
 
+    /// <summary>
+    /// 不加 <see cref="FileOptions.WriteThrough"/>（T-003 方案 v5 §4.2 第 4 步）：那个选项配上
+    /// 默认 4096 字节的缓冲区，会把一个几百 KB 的歌单文件拆成几十次逐块同步写盘，是 CI 上
+    /// 5000 条挪动操作耗时明显偏高的主因。这里先把整份内容编码成一个完整的字节数组，一次
+    /// <see cref="FileStream.Write(byte[], int, int)"/> 写完，最后调用一次
+    /// <see cref="FileStream.Flush(bool)"/>（等价于 FlushFileBuffers）强制落盘——
+    /// 持久性保证不变：<see cref="File.Move(string, string, bool)"/> 替换正式文件之前，
+    /// 数据已经写到磁盘，仍然满足 FR-019。
+    /// </summary>
     private static void WriteTempFile(string tmpPath, string json)
     {
-        using var fs = new FileStream(tmpPath, FileMode.Create, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough);
-        using var writer = new StreamWriter(fs, new UTF8Encoding(false));
-        writer.Write(json);
-        writer.Flush();
+        var bytes = new UTF8Encoding(false).GetBytes(json);
+        using var fs = new FileStream(tmpPath, FileMode.Create, FileAccess.Write, FileShare.None);
+        fs.Write(bytes, 0, bytes.Length);
         fs.Flush(true);
     }
 
