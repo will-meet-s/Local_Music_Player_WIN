@@ -552,4 +552,34 @@ public class PlaybackQueueTests
 
         Assert.Equal(2, q.Next(auto: true)); // X，在 [A,B,X] 里下标 2
     }
+
+    // N-1 修复回归用例（TC-259，T-008 方案 v5.1 §2.3）：随机模式下移除当前曲目、
+    // 且它恰好是本轮顺序表里的最后一首，紧接着以 RandomInRemainder 追加 3 首新曲目——
+    // 追加前「未播段」是空的，旧的 ComputeResumeAt 会在旧顺序表里从末尾之后开始找，
+    // 找不到任何存活曲目，退化成返回追加后顺序表的 Count（越界哨兵值），
+    // 于是下一次 Next 直接判定"本轮已经放完"提前洗出下一轮，把这 3 首新曲目在本轮跳过。
+    // 续播位置改成「未播段」起点（RemainingStart）后，就不会再依赖这条按下标查找的逻辑。
+    [Fact]
+    public void ApplyEdit_TC259_ShuffleMode_RemoveLastCurrentThenAppend_NextCoversAllNewTracksThisRound()
+    {
+        var q = new PlaybackQueue(5, PlayMode.Shuffle);
+        var initialOrder = q.CurrentOrder.ToList();
+        var lastTrack = initialOrder[^1]; // 顺序表里排在最后的曲目，让 splitPosition 落在旧顺序表末尾
+        q.Select(lastTrack);
+
+        var survivors = Enumerable.Range(0, 5).Where(i => i != lastTrack).OrderBy(i => i).ToList();
+        var removeMap = new int?[5];
+        for (var i = 0; i < 5; i++)
+            removeMap[i] = i == lastTrack ? null : survivors.IndexOf(i);
+        q.ApplyEdit(removeMap, newCount: 4, added: Array.Empty<int>(), EditPlacement.KeepNatural, relocated: Array.Empty<int>());
+        Assert.Null(q.Current);
+
+        var appendMap = Enumerable.Range(0, 4).Select(i => (int?)i).ToList();
+        q.ApplyEdit(appendMap, newCount: 7, added: new[] { 4, 5, 6 }, EditPlacement.RandomInRemainder, relocated: Array.Empty<int>());
+
+        var playedThisRound = new List<int>();
+        for (var i = 0; i < 3; i++) playedThisRound.Add(q.Next(auto: true)!.Value);
+
+        Assert.Equal(new[] { 4, 5, 6 }, playedThisRound.OrderBy(x => x));
+    }
 }
