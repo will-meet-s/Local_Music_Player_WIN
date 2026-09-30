@@ -41,10 +41,10 @@ internal static class WindowBackdrop
 
         if (build >= MinimumAcrylicBuild && DesktopAcrylicController.IsSupported())
         {
-            window.SystemBackdrop = new DesktopAcrylicBackdrop();
+            window.SystemBackdrop = new ThinAcrylicBackdrop();
             // 设透明，不设 null：null 会让空白区域收不到鼠标点击
             root.Background = new SolidColorBrush(Colors.Transparent);
-            Diagnostics = $"build={build} acrylic=on darkHr=0x{darkHr:X8}";
+            Diagnostics = $"build={build} acrylic=thin darkHr=0x{darkHr:X8}";
             return true;
         }
 

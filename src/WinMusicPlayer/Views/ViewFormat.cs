@@ -1,4 +1,5 @@
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Media;
 using MusicCore.Support;
 
 namespace WinMusicPlayer.Views;
@@ -29,4 +30,17 @@ internal static class ViewFormat
     public static string LayoutTip(string name) => $"当前：{name}，点击切换";
 
     public static string Percent(double value) => $"{Math.Round(value * 100)}%";
+
+    /// <summary>
+    /// 按资源键取画刷，查不到时写诊断日志并回退成用 <paramref name="fallback"/> 新建的纯色画刷，
+    /// 而不是直接抛异常——查不到资源不该让歌词整块显示不出来（DEF-002）。
+    /// </summary>
+    internal static Brush ResourceBrush(string key, Windows.UI.Color fallback)
+    {
+        if (Application.Current.Resources.TryGetValue(key, out var value) && value is Brush brush)
+            return brush;
+
+        CrashLog.WriteNote("Resource", $"missing {key}");
+        return new SolidColorBrush(fallback);
+    }
 }

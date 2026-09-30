@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Linq;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
@@ -65,6 +66,15 @@ public sealed partial class LyricsView : UserControl
 
         DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low,
             () => LyricsScroller.ChangeView(null, 0, null, disableAnimation: true));
+
+        // 诊断信息：定位「歌词不显示」时区分是没有歌词数据、还是展示模式把歌词区隐藏了。
+        // 不用 LyricsAreSynced：RefreshLyrics 里它是在 Lyrics 之后才赋值的，这里执行时
+        // 它还是上一首歌的值，所以直接用 Time >= 0 数出带时间轴的行数
+        var track = ViewModel.PlayingTrack;
+        var hasLrc = track is not null && File.Exists(Path.ChangeExtension(track.Path, ".lrc"));
+        CrashLog.WriteNote("Lyrics",
+            $"file={Path.GetFileName(track?.Path) ?? "(none)"} lines={lyrics.Count} " +
+            $"timed={lyrics.Count(l => l.Time >= 0)} lrc={hasLrc} layout={ViewModel.NowPlayingLayout}");
     }
 
     /// <summary>
@@ -94,14 +104,14 @@ public sealed partial class LyricsView : UserControl
 
     private static void ApplyNormalStyle(TextBlock line)
     {
-        line.Foreground = (Brush)Application.Current.Resources["SecondaryTextBrush"];
+        line.Foreground = ViewFormat.ResourceBrush("SecondaryTextBrush", Windows.UI.Color.FromArgb(0xFF, 0xA0, 0xA0, 0xAC));
         line.FontSize = 13;
         line.FontWeight = FontWeights.Normal;
     }
 
     private static void ApplyCurrentStyle(TextBlock line)
     {
-        line.Foreground = (Brush)Application.Current.Resources["TextBrush"];
+        line.Foreground = ViewFormat.ResourceBrush("TextBrush", Windows.UI.Color.FromArgb(0xFF, 0xF2, 0xF2, 0xF5));
         line.FontSize = 15;
         line.FontWeight = FontWeights.SemiBold;
     }
