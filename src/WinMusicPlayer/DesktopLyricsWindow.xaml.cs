@@ -105,6 +105,11 @@ public sealed partial class DesktopLyricsWindow : Window
         UpdateText();
 
         ViewModel.PropertyChanged += OnViewModelPropertyChanged;
+
+        // 诊断信息：定位浮层黑框——backdrop 是否真的设上了透明色刷、锁定状态和当前的扩展样式
+        var exStyle = (long)ClickThrough.GetWindowLongPtr(_hwnd, ClickThrough.GwlExStyle);
+        CrashLog.WriteNote("DesktopLyrics",
+            $"loaded locked={IsLocked} exstyle=0x{exStyle:X8} backdrop={TransparentBackdrop.LastApplySucceeded}");
     }
 
     private void OnClosed(object sender, WindowEventArgs args)
