@@ -178,6 +178,30 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>
+    /// 定位当前播放的歌曲在曲库列表里的位置（T-016 方案 v1 §2.2，FR-029）。只读，不修改任何状态
+    /// （⑤）。结果为 <see cref="LocateOutcome.NotInFolder"/> 时设置 <see cref="Notice"/>（⑦）；
+    /// <see cref="LocateOutcome.FilteredOut"/> 的提示由界面层的 <c>InfoBar</c> 负责（界面接入阶段）。
+    /// </summary>
+    public LocateResult LocateCurrent()
+    {
+        var result = LibraryLocator.Locate(PlayingTrack, Tracks, _library);
+        if (result.Outcome == LocateOutcome.NotInFolder)
+            Notice = "当前播放的歌曲不在当前文件夹中";
+        return result;
+    }
+
+    /// <summary>
+    /// 「清空搜索并定位」（T-016 方案 v1 §2.2，FR-029 ⑥）：和用户手动清空搜索框完全一样，
+    /// 走 <see cref="RebuildDisplayed"/>，跟随状态下播放列表会跟着变（FR-024 ①）；
+    /// 然后返回 <see cref="LocateCurrent"/> 的结果。
+    /// </summary>
+    public LocateResult ClearSearchAndLocate()
+    {
+        SearchText = "";
+        return LocateCurrent();
+    }
+
     private TrackSortOrder _sortOrder;
     public TrackSortOrder SortOrder
     {
@@ -265,8 +289,16 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
             Raise(nameof(PlayingTitle));
             Raise(nameof(PlayingSubtitle));
             Raise(nameof(PlayingArtwork));
+            Raise(nameof(CanLocateCurrent));
         }
     }
+
+    /// <summary>
+    /// 「定位当前播放」按钮是否可用（T-016 方案 v1 §2.2，FR-029 ②）：「当前加载着」的口径和基线
+    /// 一致——<see cref="Stop"/> 之后 <see cref="PlayingTrack"/> 还在，按钮仍然可用；
+    /// <c>Unload</c>（切换文件夹、清空、全部播放失败）之后为 null，按钮不可用。
+    /// </summary>
+    public bool CanLocateCurrent => PlayingTrack is not null;
 
     public string PlayingTitle => _playingTrack?.Title ?? "未在播放";
     public string PlayingSubtitle => _playingTrack?.Subtitle ?? "";

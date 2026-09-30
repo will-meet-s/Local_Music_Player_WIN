@@ -37,13 +37,23 @@ public static class PerfTrace
     private static readonly ConcurrentDictionary<string, Stopwatch> Pending = new();
     private static readonly object WriteGate = new();
 
-    /// <summary>开始一次打点。同一个打点名在上一次还没结束时再次调用，会覆盖掉上一次
-    /// （诊断功能，单用户手工测试场景，不处理并发重叠）。</summary>
+    /// <summary>
+    /// 开始一次打点。同一个打点名在上一次还没结束时再次调用，会覆盖掉上一次（诊断功能，
+    /// 单用户手工测试场景，不处理并发重叠）。
+    /// <para>
+    /// <b>打点跨越渲染边界（开始在命令入口，结束在 <c>CompositionTarget.Rendering</c> 回调）时，
+    /// 不能把返回值包进 <c>using</c>！</b>那样命令方法一结束，<c>Dispose</c> 就会立刻把这次测量
+    /// 结束掉，记下来的只是命令本身的耗时，不包含渲染这一段。正确写法是丢弃返回值——
+    /// <c>PerfTrace.Measure(name);</c>——然后在 <c>Rendering</c> 回调里调用 <see cref="End"/>。
+    /// 只有开始和结束确实在同一段同步代码里（不跨越渲染/异步边界）时，才适合用 <c>using</c>。
+    /// </para>
+    /// </summary>
     public static IDisposable Measure(string name) => Measure(name, Enabled, LogPath);
 
     /// <summary>结束 <paramref name="name"/> 对应的打点并写一行日志（方案 §2.3：界面层在
-    /// <c>CompositionTarget.Rendering</c> 第一次触发、且内容已经画出来时调用）。没有对应的
-    /// <see cref="Measure"/>，或者已经结束过，都安静地什么都不做。</summary>
+    /// <c>CompositionTarget.Rendering</c> 第一次触发、且内容已经画出来时调用；配套的
+    /// <see cref="Measure"/> 调用必须丢弃返回值，不能用 <c>using</c>，见 <see cref="Measure"/>
+    /// 的说明）。没有对应的 <see cref="Measure"/>，或者已经结束过，都安静地什么都不做。</summary>
     public static void End(string name) => End(name, Enabled, LogPath);
 
     /// <summary>
