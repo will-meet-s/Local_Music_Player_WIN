@@ -162,6 +162,10 @@ public sealed class AvailabilityCheckerTests
         var ui = new ImmediateSyncContext();
         using var checker = new AvailabilityChecker(ui, probe);
 
+        // 预热：先调用一次 Enqueue，排除 JIT 编译开销，不计时（T-003 方案 v4 §7；复审
+        // 2026-10-01：这条断言的是「不被锁阻塞」，不改成中位数写法，但仍然要预热）
+        checker.Enqueue(new[] { new Track("warmup.mp3") }, CheckPriority.Low);
+
         // 触发后台工作线程去探测这个根目录（会卡住 2 秒）
         checker.Enqueue(new[] { new Track("/mnt/slow/a.mp3") }, CheckPriority.High);
         Assert.True(probeStarted.Wait(TimeSpan.FromSeconds(1)), "后台线程应该已经进入探测");
@@ -175,30 +179,44 @@ public sealed class AvailabilityCheckerTests
         Assert.True(sw.ElapsedMilliseconds < 50, $"Enqueue 耗时 {sw.ElapsedMilliseconds}ms，应该立即返回，不该等探测完成");
     }
 
-    // M-4：TakeNext 改成 Queue + 懒删除之后，大量曲目也应该是线性时间，不能退化成 O(n²)
+    // M-4：TakeNext 改成 Queue + 懒删除之后，大量曲目也应该是线性时间，不能退化成 O(n²)。
+    // 按 T-003 方案 v4 §7「性能类单测的统一写法」：先预热 1 次（全新的 checker 和曲目，避免和
+    // 计时的几次互相影响）不计时，再连续计时 5 次，断言中位数，失败信息里列出全部 5 次耗时。
 
     [Fact]
-    public async Task Enqueue_TwoHundredThousandTracks_ProcessesInLinearTimeNotQuadratic()
+    public async Task Enqueue_TwoHundredThousandTracks_MedianOfFiveRunsProcessesInLinearTimeNotQuadratic()
     {
-        var probe = new FakeFileProbe();
-        var tracks = Enumerable.Range(0, 200_000).Select(i => new Track($"track-{i:D6}.mp3")).ToList();
-        // 一半存在、一半不存在：都会触发一次 IsAvailable 变化，用来判断处理是否已经全部完成
-        foreach (var t in tracks.Where((_, i) => i % 2 == 0)) probe.ExistingFiles.Add(t.Path);
+        async Task<double> RunOnceAsync()
+        {
+            var probe = new FakeFileProbe();
+            var tracks = Enumerable.Range(0, 200_000).Select(i => new Track($"track-{i:D6}.mp3")).ToList();
+            // 一半存在、一半不存在：都会触发一次 IsAvailable 变化，用来判断处理是否已经全部完成
+            foreach (var t in tracks.Where((_, i) => i % 2 == 0)) probe.ExistingFiles.Add(t.Path);
 
-        var ui = new ImmediateSyncContext();
-        using var checker = new AvailabilityChecker(ui, probe);
+            var ui = new ImmediateSyncContext();
+            using var checker = new AvailabilityChecker(ui, probe);
 
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-        checker.Enqueue(tracks, CheckPriority.Low);
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            checker.Enqueue(tracks, CheckPriority.Low);
 
-        var deadline = DateTime.UtcNow.AddSeconds(15);
-        while (DateTime.UtcNow < deadline && tracks.Any(t => t.IsAvailable != probe.ExistingFiles.Contains(t.Path)))
-            await Task.Delay(20);
-        sw.Stop();
+            var deadline = DateTime.UtcNow.AddSeconds(15);
+            while (DateTime.UtcNow < deadline && tracks.Any(t => t.IsAvailable != probe.ExistingFiles.Contains(t.Path)))
+                await Task.Delay(20);
+            sw.Stop();
 
-        foreach (var t in tracks)
-            Assert.Equal(probe.ExistingFiles.Contains(t.Path), t.IsAvailable);
+            foreach (var t in tracks)
+                Assert.Equal(probe.ExistingFiles.Contains(t.Path), t.IsAvailable);
 
-        Assert.True(sw.ElapsedMilliseconds < 1000, $"处理 20 万条耗时 {sw.ElapsedMilliseconds}ms，应该在 1 秒内完成（O(n²) 会远超这个时间）");
+            return sw.Elapsed.TotalMilliseconds;
+        }
+
+        await RunOnceAsync(); // 预热，不计时
+
+        var elapsedMs = new List<double>();
+        for (var i = 0; i < 5; i++)
+            elapsedMs.Add(await RunOnceAsync());
+
+        var median = elapsedMs.OrderBy(ms => ms).ElementAt(elapsedMs.Count / 2);
+        Assert.True(median < 1000, $"耗时 [{string.Join(",", elapsedMs.Select(ms => ms.ToString("F0")))}]ms（O(n²) 会远超这个时间）");
     }
 }

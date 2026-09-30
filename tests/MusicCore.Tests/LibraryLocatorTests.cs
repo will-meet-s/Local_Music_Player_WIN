@@ -119,19 +119,31 @@ public sealed class LibraryLocatorTests
         Assert.Equal(-1, result.Index);
     }
 
-    // 8：1 万首，定位最后一首，耗时不超过 5 毫秒
+    // 8：1 万首，定位最后一首，耗时不超过 5 毫秒。按 T-003 方案 v4 §7「性能类单测的统一写法」：
+    // 先预热 1 次不计时，再连续计时 5 次，断言中位数，失败信息里列出全部 5 次耗时——单次计时、
+    // 不预热的写法量到的是 JIT 编译开销，不是稳态性能（复审 2026-10-01：CI 上量到过 6.53 毫秒）。
 
     [Fact]
-    public void Locate_TenThousandTracksLocateLast_CompletesWithinFiveMilliseconds()
+    public void Locate_TenThousandTracksLocateLast_MedianOfFiveRunsWithinFiveMilliseconds()
     {
         var tracks = MakeTracks(10_000);
 
-        var sw = Stopwatch.StartNew();
-        var result = LibraryLocator.Locate(tracks[^1], tracks, tracks);
-        sw.Stop();
+        double RunOnce()
+        {
+            var sw = Stopwatch.StartNew();
+            var result = LibraryLocator.Locate(tracks[^1], tracks, tracks);
+            sw.Stop();
 
-        Assert.Equal(LocateOutcome.Found, result.Outcome);
-        Assert.Equal(tracks.Length - 1, result.Index);
-        Assert.True(sw.Elapsed.TotalMilliseconds < 5, $"耗时 {sw.Elapsed.TotalMilliseconds}ms，应该在 5 毫秒内完成");
+            Assert.Equal(LocateOutcome.Found, result.Outcome);
+            Assert.Equal(tracks.Length - 1, result.Index);
+            return sw.Elapsed.TotalMilliseconds;
+        }
+
+        RunOnce(); // 预热，不计时
+
+        var elapsedMs = Enumerable.Range(0, 5).Select(_ => RunOnce()).ToList();
+
+        var median = elapsedMs.OrderBy(ms => ms).ElementAt(elapsedMs.Count / 2);
+        Assert.True(median < 5, $"耗时 [{string.Join(",", elapsedMs)}]ms");
     }
 }
