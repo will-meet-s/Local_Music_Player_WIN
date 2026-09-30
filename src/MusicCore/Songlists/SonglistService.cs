@@ -153,6 +153,14 @@ public sealed class SonglistService
         return SonglistResult<int>.Ok(op.Removed);
     }
 
+    /// <summary>把 <paramref name="refreshedTracks"/> 里读到的最新显示信息写回缓存字段
+    /// （T-003 方案 v4 §4.4）。按曲目身份对齐，不改曲目和顺序；缓存字段其实没变化时不写盘。</summary>
+    public async Task<SonglistResult> RefreshCacheAsync(Guid id, IReadOnlyList<Track> refreshedTracks)
+    {
+        var (ok, _, error) = await ExecuteAsync(new RefreshCacheOperation(id, refreshedTracks), SonglistChangeKind.EntriesChanged);
+        return ok ? SonglistResult.Ok() : SonglistResult.Fail(error!.Value);
+    }
+
     /// <summary>
     /// 所有改动类操作的统一入口（§4.2）：预校验 → 排队 → 后台线程上拿跨进程锁、SyncFromDisk、
     /// 在最新数据的一份本地快照上重新校验并应用、写盘/删除 → 回到调用方线程后才提交到共享的

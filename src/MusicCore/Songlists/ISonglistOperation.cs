@@ -259,3 +259,50 @@ internal sealed class RemoveTracksOperation : ISonglistOperation
         return removed == 0 ? current : current with { Entries = remaining };
     }
 }
+
+/// <summary>
+/// 打开歌单、后台补全元数据之后，把读到的最新显示信息写回缓存字段（T-003 方案 v4 §4.4）。
+/// 按 <see cref="TrackIdentity"/> 对齐，不按下标——写盘时另一个窗口可能已经加过、挪过、删过曲目，
+/// 只更新还在最新数据里、且缓存字段确实变了的那些条目，不改曲目本身和顺序，也不触发提示。
+/// </summary>
+internal sealed class RefreshCacheOperation : ISonglistOperation
+{
+    private readonly Guid _id;
+    private readonly IReadOnlyList<Track> _refreshedTracks;
+
+    public RefreshCacheOperation(Guid id, IReadOnlyList<Track> refreshedTracks)
+    {
+        _id = id;
+        _refreshedTracks = refreshedTracks;
+    }
+
+    public Guid? TargetId => _id;
+
+    public Songlist? Apply(IReadOnlyDictionary<Guid, Songlist> fresh)
+    {
+        if (!fresh.TryGetValue(_id, out var current)) throw new SonglistException(SonglistErrorCode.NotFound);
+
+        var updates = new Dictionary<string, Track>(StringComparer.OrdinalIgnoreCase);
+        foreach (var track in _refreshedTracks) updates[TrackIdentity.Normalize(track.Path)] = track;
+
+        var changed = false;
+        var newEntries = new List<SonglistEntry>(current.Entries.Count);
+        foreach (var entry in current.Entries)
+        {
+            if (updates.TryGetValue(TrackIdentity.Normalize(entry.Path), out var track) &&
+                (entry.Title != track.Title || entry.Artist != track.Artist ||
+                 entry.Album != track.Album || entry.Duration != track.Duration))
+            {
+                newEntries.Add(new SonglistEntry(entry.Path, track.Title, track.Artist, track.Album, track.Duration));
+                changed = true;
+            }
+            else
+            {
+                newEntries.Add(entry);
+            }
+        }
+
+        // 缓存字段其实没有变化：不写盘，原样返回读到的实例
+        return changed ? current with { Entries = newEntries } : current;
+    }
+}
