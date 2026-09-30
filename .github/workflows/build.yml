@@ -14,7 +14,23 @@ jobs:
           dotnet-version: '10.0.x'
       - run: dotnet restore WinMusicPlayer.sln -p:Platform=x64
       - run: dotnet build WinMusicPlayer.sln -c Release -p:Platform=x64 --no-restore
-      - run: dotnet test tests/MusicCore.Tests -c Release --no-build
+      - run: dotnet test tests/MusicCore.Tests -c Release --no-build --logger "trx;LogFileName=results.trx" --results-directory TestResults
+      - name: 失败用例写成 annotations（公开可读）
+        if: failure()
+        shell: pwsh
+        run: |
+          function Esc([string]$s) { ($s -replace '%','%25' -replace "`r",'' -replace "`n",'%0A') }
+          function EscProp([string]$s) { (Esc $s) -replace ':','%3A' -replace ',','%2C' }
+          $trx = Get-ChildItem TestResults -Recurse -Filter *.trx -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $trx) { Write-Output "::error title=没有生成 TRX::dotnet test 在运行用例之前就失败了（编译或发现阶段）"; exit 0 }
+          [xml]$x = Get-Content $trx.FullName -Raw
+          $failed = @($x.TestRun.Results.UnitTestResult | Where-Object { $_.outcome -eq 'Failed' })
+          Write-Output "::error title=失败用例数::$($failed.Count) 条（下面最多列出 9 条）"
+          foreach ($r in ($failed | Select-Object -First 9)) {
+            $msg = "$($r.Output.ErrorInfo.Message)`n$((($r.Output.ErrorInfo.StackTrace) -split "`n" | Select-Object -First 4) -join "`n")"
+            if ($msg.Length -gt 1500) { $msg = $msg.Substring(0, 1500) }
+            Write-Output "::error title=$(EscProp $r.testName)::$(Esc $msg)"
+          }
 
   publish:
     needs: build
