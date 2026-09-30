@@ -90,11 +90,17 @@ public sealed class SonglistDetailViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// 打开歌单页后台补全元数据（T-003 方案 v4 §4.4）：依次对 <see cref="Track.MetadataLoaded"/>
+    /// 打开歌单页后台补全元数据（T-003 方案 v6 §4.4）：依次对 <see cref="Track.MetadataLoaded"/>
     /// 为 false 的曲目调用 <see cref="MetadataLoader.Load"/>，就地拷贝而不是替换对象——
     /// <see cref="Displayed"/> 里放的是同一批引用，就地改两边同时生效。全部读完之后，
     /// 缓存字段有变化的话提交一次 <see cref="SonglistService.RefreshCacheAsync"/>，一个歌单只写一次；
     /// 这一步不改曲目和顺序，也不触发提示。离开歌单页时用 <paramref name="token"/> 取消。
+    /// <para>
+    /// 文件不存在时跳过，不读也不回写（v6）：<see cref="MetadataLoader.Load"/> 读不到文件时不会
+    /// 报错，只会返回「标题 = 文件名、其余字段为空」的兜底结果——如果照样回写进去，网络盘断开、
+    /// U 盘拔掉之类的情况下，歌单里缓存的歌名、歌手、专辑就会被永久清空，正好和缓存存在的目的
+    /// 相反（FR-020）。文件存在但标签读取失败（文件损坏）时，照常使用兜底结果。
+    /// </para>
     /// </summary>
     public async Task LoadMetadataAsync(CancellationToken token = default)
     {
@@ -109,10 +115,12 @@ public sealed class SonglistDetailViewModel : ObservableObject, IDisposable
             var beforeAlbum = track.Album;
             var beforeDuration = track.Duration;
 
-            var loaded = await Task.Run(() => MetadataLoader.Load(track.Path), token);
+            var (exists, loaded) = await Task.Run<(bool Exists, Track? Loaded)>(() =>
+                File.Exists(track.Path) ? (true, MetadataLoader.Load(track.Path)) : (false, null), token);
             if (token.IsCancellationRequested) return;
+            if (!exists) continue;
 
-            CopyMetadata(from: loaded, to: track);
+            CopyMetadata(from: loaded!, to: track);
 
             if (track.Title != beforeTitle || track.Artist != beforeArtist ||
                 track.Album != beforeAlbum || Math.Abs(track.Duration - beforeDuration) > 0.001)

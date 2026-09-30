@@ -414,28 +414,41 @@ public class NowPlayingListEditTests
         Assert.Null(list.Queue.Current);
     }
 
-    // 测试 16：1 万首的列表上，编辑操作耗时在 50 毫秒以内
+    // 测试 16：1 万首的列表上，编辑操作耗时在 50 毫秒以内。按 T-003 方案 v4 §7「性能类单测的
+    // 统一写法」：每种操作各自先预热 1 次（不计时），再连续做 5 次、每次单独计时，断言中位数，
+    // 失败信息里列出全部 5 次耗时——CI 是共享 runner，单次计时、不预热的写法量到的是 JIT 编译和
+    // 首次调用的一次性开销，不是稳态性能（复审 2026-09-30：单次写法在 CI 上偶发量到 76 毫秒）。
 
     [Fact]
     public void LargeList_EditOperationsCompleteWithin50Milliseconds()
     {
-        var list = new NowPlayingList(PlayMode.Sequential);
-        var tracks = MakeTracks(10_000);
-        list.PlayFromLibrary(tracks, 5000);
+        AssertMedianUnder50Ms("PlayNext", (list, tracks) => list.PlayNext(new[] { tracks[1], tracks[9999] }, tracks[5000]));
+        AssertMedianUnder50Ms("Remove", (list, _) => list.Remove(new[] { 10, 20, 30 }));
+        AssertMedianUnder50Ms("Move", (list, _) => list.Move(100, 200));
+    }
 
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-        list.PlayNext(new[] { tracks[1], tracks[9999] }, tracks[5000]);
-        sw.Stop();
-        Assert.True(sw.ElapsedMilliseconds < 50, $"PlayNext 耗时 {sw.ElapsedMilliseconds}ms");
+    /// <summary>每次调用都在一个全新的 1 万首列表上执行 <paramref name="operation"/>：先预热 1 次
+    /// 不计时，再连续计时 5 次，断言中位数。列表的构造（PlayFromLibrary）不计入耗时，只计时
+    /// <paramref name="operation"/> 本身。</summary>
+    private static void AssertMedianUnder50Ms(string label, Action<NowPlayingList, Track[]> operation)
+    {
+        long RunOnce()
+        {
+            var list = new NowPlayingList(PlayMode.Sequential);
+            var tracks = MakeTracks(10_000);
+            list.PlayFromLibrary(tracks, 5000);
 
-        sw.Restart();
-        list.Remove(new[] { 10, 20, 30 });
-        sw.Stop();
-        Assert.True(sw.ElapsedMilliseconds < 50, $"Remove 耗时 {sw.ElapsedMilliseconds}ms");
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            operation(list, tracks);
+            sw.Stop();
+            return sw.ElapsedMilliseconds;
+        }
 
-        sw.Restart();
-        list.Move(100, 200);
-        sw.Stop();
-        Assert.True(sw.ElapsedMilliseconds < 50, $"Move 耗时 {sw.ElapsedMilliseconds}ms");
+        RunOnce(); // 预热，不计时
+
+        var elapsedMs = Enumerable.Range(0, 5).Select(_ => RunOnce()).ToList();
+
+        var median = elapsedMs.OrderBy(ms => ms).ElementAt(elapsedMs.Count / 2);
+        Assert.True(median < 50, $"{label} 耗时 [{string.Join(",", elapsedMs)}]ms");
     }
 }

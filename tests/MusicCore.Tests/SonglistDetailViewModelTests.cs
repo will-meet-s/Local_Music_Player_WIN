@@ -136,38 +136,37 @@ public sealed class SonglistDetailViewModelTests : IDisposable
         Assert.Equal(new[] { "C08", "C07", "NewSong" }, vm.Displayed.Select(t => t.Title));
     }
 
-    // 元数据缓存回写（T-003 方案 v4 §4.4）
+    // 元数据缓存回写（T-003 方案 v6 §4.4 修 M-1）：文件不存在时跳过，不读也不回写——
+    // MetadataLoader.Load 读不到文件时返回的兜底结果（标题降级为文件名、其余字段清空）
+    // 不能回写进歌单，否则网络盘断开、U 盘拔掉之类的情况下，缓存的歌名、歌手、专辑会被
+    // 永久清空，和缓存存在的目的相反（FR-020）。
 
     [Fact]
-    public async Task LoadMetadataAsync_TracksNotYetLoaded_BatchesAllChangesIntoOneRefresh()
+    public async Task LoadMetadataAsync_FileDoesNotExist_SkipsAndDoesNotWrite()
     {
         var service = new SonglistService(_dir);
         await service.LoadAllAsync();
         var created = await service.CreateAsync("测试歌单");
         var id = created.Value!.Id;
 
-        // 两条都指向不存在的文件、且缓存字段是过时的——MetadataLoader.Load 读不到文件时
-        // 只把标题降级为文件名，其余字段清空，和这里塞进去的缓存字段肯定不一致
-        var stale1 = new Track("missing-1.mp3") { Title = "Old Title 1", Artist = "Old Artist 1", Album = "Old Album 1", Duration = 111 };
-        var stale2 = new Track("missing-2.mp3") { Title = "Old Title 2", Artist = "Old Artist 2", Album = "Old Album 2", Duration = 222 };
-        await service.AddTracksAsync(id, new[] { stale1, stale2 });
+        var stale = new Track("missing.mp3") { Title = "Old Title", Artist = "Old Artist", Album = "Old Album", Duration = 111 };
+        await service.AddTracksAsync(id, new[] { stale });
 
         var path = Path.Combine(_dir, $"{id:N}.json");
         var writeTimeBeforeLoad = File.GetLastWriteTimeUtc(path);
+        var bytesBeforeLoad = File.ReadAllBytes(path);
 
-        var catalog = new TrackCatalog();
-        var vm = new SonglistDetailViewModel(service, catalog, id);
-
+        var vm = new SonglistDetailViewModel(service, new TrackCatalog(), id);
         await vm.LoadMetadataAsync();
 
-        Assert.True(File.GetLastWriteTimeUtc(path) > writeTimeBeforeLoad, "缓存字段变了应该触发一次写盘");
+        Assert.Equal(writeTimeBeforeLoad, File.GetLastWriteTimeUtc(path));
+        Assert.Equal(bytesBeforeLoad, File.ReadAllBytes(path));
 
-        var entries = service.GetEntries(id);
-        Assert.Equal("missing-1", entries[0].Title);
-        Assert.Null(entries[0].Artist);
-        Assert.Null(entries[0].Album);
-        Assert.Equal(0, entries[0].Duration);
-        Assert.Equal("missing-2", entries[1].Title);
-        Assert.Null(entries[1].Artist);
+        var entry = service.GetEntries(id).Single();
+        Assert.Equal("Old Title", entry.Title);
+        Assert.Equal("Old Artist", entry.Artist);
+        Assert.Equal("Old Album", entry.Album);
+        Assert.Equal(111, entry.Duration);
+        Assert.False(vm.Displayed.Single().MetadataLoaded);
     }
 }
