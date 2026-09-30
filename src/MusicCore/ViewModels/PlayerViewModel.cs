@@ -709,6 +709,33 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
         StartCurrent();
     }
 
+    // MARK: - T-006：歌单里点播
+
+    /// <summary>
+    /// 在歌单详情页点播某一首（T-006 方案 v1 §2.2）。<paramref name="displayed"/> 是歌单详情页
+    /// 当前显示的列表（含 T-012 歌单内搜索的结果），<paramref name="name"/> 是歌单名。
+    /// T-007 合入之前，"是否可用"一律按可用处理，所以这里不做可用性检查。
+    /// </summary>
+    public void PlaySonglistAt(IReadOnlyList<Track> displayed, int index, string name)
+    {
+        if (index < 0 || index >= displayed.Count) return;
+
+        NowPlaying.PlayFromSonglist(displayed, index, name);
+        StartCurrent();
+    }
+
+    /// <summary>
+    /// 歌单详情页「播放全部」（T-006 方案 v1 §2.2）：从第 0 首开始。
+    /// T-007 合入之前，"是否可用"一律按可用处理，所以总是从第 0 首开始，不需要往后找可用的曲目；
+    /// 全部不可用时提示并保持播放列表不变的分支要等 T-007 提供可用性检查之后才能实现。
+    /// </summary>
+    public void PlaySonglistAll(IReadOnlyList<Track> displayed, string name)
+    {
+        if (displayed.Count == 0) return;
+
+        PlaySonglistAt(displayed, 0, name);
+    }
+
     // MARK: - T-008：播放列表编辑
 
     /// <summary>下一首播放（FR-004）。<paramref name="tracks"/> 必须已经按列表里的上下顺序排好（界面层用 SelectionOrder.ByListOrder）。</summary>

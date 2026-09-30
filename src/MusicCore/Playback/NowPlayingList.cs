@@ -104,6 +104,27 @@ public sealed class NowPlayingList
     /// <summary>在播放列表页里双击：只选中这一首，状态和来源都不变。</summary>
     public void SelectInList(int index) => Queue.Select(index);
 
+    /// <summary>
+    /// 在歌单里点播（T-006 方案 v1 §2.1）：<see cref="Items"/> 整体替换为 <paramref name="snapshot"/>
+    /// 的新副本，之后歌单的任何改动都不再通知播放列表（FR-025）——<c>ReplaceAll</c> 逐项拷贝进内部
+    /// 存储，不持有调用方传入的这份集合引用。<paramref name="name"/> 是点播这一刻的歌单名快照，
+    /// 之后歌单改名也不会跟着变（FR-001、FR-025）。
+    /// </summary>
+    public void PlayFromSonglist(IReadOnlyList<Track> snapshot, int index, string name)
+    {
+        if (snapshot.Count == 0 || index < 0 || index >= snapshot.Count) return;
+
+        _items.ReplaceAll(snapshot);
+        State = NowPlayingState.Independent;
+        Source = NowPlayingSource.Songlist;
+        SourceName = name;
+
+        Queue.SetCount(_items.Count);
+        Queue.Select(index);
+
+        Changed?.Invoke();
+    }
+
     // ── T-008：编辑操作 ──
 
     /// <summary>
