@@ -129,6 +129,48 @@ public sealed class NowPlayingList
         Changed?.Invoke();
     }
 
+    // ── T-010：重启恢复 ──
+
+    /// <summary>
+    /// 存成快照供 <see cref="NowPlayingStore"/> 保存（T-010 方案 v1 §2.2、§3）。<see cref="NowPlayingState.FollowLibrary"/>
+    /// 状态下 <c>Items</c> 必须是空数组：恢复时按重新扫描后的曲库来，不保存旧曲库的列表内容
+    /// （否则重启后会显示旧曲库列表，违反 FR-009 ②）；<c>CurrentPath</c> 两种状态下都要填，
+    /// 跟随状态靠它在重新扫描后的曲库里定位当前曲目。
+    /// </summary>
+    public NowPlayingSnapshot ToSnapshot()
+    {
+        var currentPath = CurrentIndex is int idx && idx >= 0 && idx < _items.Count ? _items[idx].Path : null;
+
+        var items = State == NowPlayingState.FollowLibrary
+            ? Array.Empty<NowPlayingSnapshotItem>()
+            : _items.Select(t => new NowPlayingSnapshotItem(t.Path, t.Title, t.Artist, t.Album, t.Duration)).ToArray();
+
+        return new NowPlayingSnapshot(State, Source, SourceName, currentPath, items, DateTime.UtcNow);
+    }
+
+    /// <summary>
+    /// 恢复独立状态的播放列表（T-010 方案 v1 §2.2）。<paramref name="items"/> 由调用方通过
+    /// <see cref="Library.TrackCatalog.Resolve"/> 解析好，保证和曲库、歌单里的同一首歌是同一个对象；
+    /// <paramref name="currentIndex"/> 为 null 时表示没有当前曲目，或者保存时的当前曲目在
+    /// <paramref name="items"/> 里已经找不到了。<b>只设置选中项，不触发播放</b>——是否播放、
+    /// 播放进度都不恢复（FR-009）。
+    /// </summary>
+    public void RestoreIndependent(IReadOnlyList<Track> items, int? currentIndex, NowPlayingSource source, string? sourceName)
+    {
+        _items.ReplaceAll(items);
+        State = NowPlayingState.Independent;
+        Source = source;
+        SourceName = sourceName;
+
+        Queue.SetCount(_items.Count);
+        if (currentIndex is int idx && idx >= 0 && idx < _items.Count)
+            Queue.Select(idx);
+        else
+            Queue.ClearSelection();
+
+        Changed?.Invoke();
+    }
+
     // ── T-008：编辑操作 ──
 
     /// <summary>
