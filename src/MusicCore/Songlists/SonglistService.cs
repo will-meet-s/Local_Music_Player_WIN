@@ -120,6 +120,39 @@ public sealed class SonglistService
         return ok ? SonglistResult.Ok() : SonglistResult.Fail(error!.Value);
     }
 
+    /// <summary>把 <paramref name="tracks"/> 追加到歌单末尾（T-004 方案 v2 §2）。按曲目身份去重，
+    /// 已经在歌单里的计入 <see cref="AddResult.Skipped"/>；一首都没新增时不写盘。</summary>
+    public async Task<SonglistResult<AddResult>> AddTracksAsync(Guid id, IReadOnlyList<Track> tracks)
+    {
+        var op = new AddTracksOperation(id, tracks);
+        var (ok, applied, error) = await ExecuteAsync(op, SonglistChangeKind.EntriesChanged);
+        if (!ok) return SonglistResult<AddResult>.Fail(error!.Value);
+
+        return SonglistResult<AddResult>.Ok(new AddResult(op.Added, op.Skipped, applied!.Name));
+    }
+
+    /// <summary>新建歌单并一次性写入 <paramref name="tracks"/>（T-004 方案 v2 §2）。只写一次盘：
+    /// 名称不合法时什么都不写。<see cref="AddResult.Skipped"/> 恒为 0。</summary>
+    public async Task<SonglistResult<AddResult>> CreateWithTracksAsync(string name, IReadOnlyList<Track> tracks)
+    {
+        var (ok, applied, error) = await ExecuteAsync(new CreateWithTracksOperation(name, tracks), SonglistChangeKind.Created);
+        if (!ok) return SonglistResult<AddResult>.Fail(error!.Value);
+
+        var s = applied!;
+        return SonglistResult<AddResult>.Ok(new AddResult(s.Entries.Count, 0, s.Name));
+    }
+
+    /// <summary>按曲目身份从歌单里移除 <paramref name="tracks"/>（T-004 方案 v2 §2）。已经不存在的
+    /// 直接忽略；实际移除数为 0 时不写盘。返回值是实际移除的首数。</summary>
+    public async Task<SonglistResult<int>> RemoveTracksAsync(Guid id, IReadOnlyList<Track> tracks)
+    {
+        var op = new RemoveTracksOperation(id, tracks);
+        var (ok, _, error) = await ExecuteAsync(op, SonglistChangeKind.EntriesChanged);
+        if (!ok) return SonglistResult<int>.Fail(error!.Value);
+
+        return SonglistResult<int>.Ok(op.Removed);
+    }
+
     /// <summary>
     /// 所有改动类操作的统一入口（§4.2）：预校验 → 排队 → 后台线程上拿跨进程锁、SyncFromDisk、
     /// 在最新数据的一份本地快照上重新校验并应用、写盘/删除 → 回到调用方线程后才提交到共享的

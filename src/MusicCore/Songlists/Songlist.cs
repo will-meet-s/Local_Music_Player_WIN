@@ -8,3 +8,7 @@ public sealed record Songlist(Guid Id, string Name, DateTime CreatedAt, long Rev
 
 /// <summary>歌单列表用的摘要信息，不含曲目内容。</summary>
 public sealed record SonglistSummary(Guid Id, string Name, int Count);
+
+/// <summary>添加曲目的结果（T-004 方案 v2 §2.1）：<see cref="Added"/> 是实际新增的首数，
+/// <see cref="Skipped"/> 是因为已经在歌单里而跳过的首数。</summary>
+public sealed record AddResult(int Added, int Skipped, string SonglistName);

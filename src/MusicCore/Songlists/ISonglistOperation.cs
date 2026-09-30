@@ -130,3 +130,132 @@ internal sealed class MoveTrackOperation : ISonglistOperation
         return current with { Entries = reordered };
     }
 }
+
+/// <summary>按 <see cref="TrackIdentity"/> 去重、保留第一次出现的（T-004 方案 v2 §2.2，
+/// `AddTracksOperation`、`CreateWithTracksOperation` 共用）。</summary>
+internal static class SonglistTrackDedup
+{
+    public static List<Track> Distinct(IReadOnlyList<Track> tracks)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var result = new List<Track>();
+        foreach (var track in tracks)
+        {
+            if (seen.Add(TrackIdentity.Normalize(track.Path))) result.Add(track);
+        }
+        return result;
+    }
+
+    public static SonglistEntry ToEntry(Track track) =>
+        new(track.Path, track.Title, track.Artist, track.Album, track.Duration);
+}
+
+/// <summary>把曲目追加到已有歌单末尾（T-004 方案 v2 §2）。</summary>
+internal sealed class AddTracksOperation : ISonglistOperation
+{
+    private readonly Guid _id;
+    private readonly List<Track> _distinctTracks;
+
+    public AddTracksOperation(Guid id, IReadOnlyList<Track> tracks)
+    {
+        _id = id;
+        _distinctTracks = SonglistTrackDedup.Distinct(tracks);
+    }
+
+    public Guid? TargetId => _id;
+
+    /// <summary>Apply 执行完之后才有意义；调用方（SonglistService）在 ExecuteAsync 返回后读取。</summary>
+    public int Added { get; private set; }
+    public int Skipped { get; private set; }
+
+    public Songlist? Apply(IReadOnlyDictionary<Guid, Songlist> fresh)
+    {
+        if (!fresh.TryGetValue(_id, out var current)) throw new SonglistException(SonglistErrorCode.NotFound);
+
+        // 已有条目先各规范化一次放进集合，输入的每一首也只规范化一次去查找——
+        // 不要对每一对(已有,输入)都调用 AreSame，那是 O(n×m)（T-004 方案 v2 §8）
+        var existingKeys = new HashSet<string>(
+            current.Entries.Select(e => TrackIdentity.Normalize(e.Path)),
+            StringComparer.OrdinalIgnoreCase);
+
+        var added = 0;
+        var skipped = 0;
+        var newEntries = new List<SonglistEntry>(current.Entries);
+        foreach (var track in _distinctTracks)
+        {
+            if (!existingKeys.Add(TrackIdentity.Normalize(track.Path))) { skipped++; continue; }
+            added++;
+            newEntries.Add(SonglistTrackDedup.ToEntry(track));
+        }
+
+        Added = added;
+        Skipped = skipped;
+
+        // Added == 0 时不写盘：原样返回读到的实例（§2.2 第 4 条）
+        return added == 0 ? current : current with { Entries = newEntries };
+    }
+}
+
+/// <summary>新建歌单并一次性写入曲目（T-004 方案 v2 §2）。只写一次盘：名称不合法时什么都不写。</summary>
+internal sealed class CreateWithTracksOperation : ISonglistOperation
+{
+    private readonly string _name;
+    private readonly List<Track> _distinctTracks;
+
+    public CreateWithTracksOperation(string name, IReadOnlyList<Track> tracks)
+    {
+        _name = name;
+        _distinctTracks = SonglistTrackDedup.Distinct(tracks);
+    }
+
+    public Guid? TargetId => null;
+
+    public Songlist? Apply(IReadOnlyDictionary<Guid, Songlist> fresh)
+    {
+        var validation = SonglistName.Validate(_name, fresh.Values.Select(s => (s.Id, s.Name)), self: null);
+        if (!validation.IsValid) throw new SonglistException(validation.Error!.Value);
+
+        var entries = _distinctTracks.Select(SonglistTrackDedup.ToEntry).ToList();
+        return new Songlist(Guid.NewGuid(), validation.TrimmedName!, DateTime.UtcNow, 0, entries);
+    }
+}
+
+/// <summary>按 <see cref="TrackIdentity"/> 从歌单里移除曲目（T-004 方案 v2 §2）。已经不存在的直接忽略。</summary>
+internal sealed class RemoveTracksOperation : ISonglistOperation
+{
+    private readonly Guid _id;
+    private readonly IReadOnlyList<Track> _tracks;
+
+    public RemoveTracksOperation(Guid id, IReadOnlyList<Track> tracks)
+    {
+        _id = id;
+        _tracks = tracks;
+    }
+
+    public Guid? TargetId => _id;
+
+    /// <summary>Apply 执行完之后才有意义；调用方（SonglistService）在 ExecuteAsync 返回后读取。</summary>
+    public int Removed { get; private set; }
+
+    public Songlist? Apply(IReadOnlyDictionary<Guid, Songlist> fresh)
+    {
+        if (!fresh.TryGetValue(_id, out var current)) throw new SonglistException(SonglistErrorCode.NotFound);
+
+        var toRemoveKeys = new HashSet<string>(
+            _tracks.Select(t => TrackIdentity.Normalize(t.Path)),
+            StringComparer.OrdinalIgnoreCase);
+
+        var remaining = new List<SonglistEntry>(current.Entries.Count);
+        var removed = 0;
+        foreach (var entry in current.Entries)
+        {
+            if (toRemoveKeys.Contains(TrackIdentity.Normalize(entry.Path))) { removed++; continue; }
+            remaining.Add(entry);
+        }
+
+        Removed = removed;
+
+        // 实际移除数为 0 时不写盘：原样返回读到的实例（§2.2）
+        return removed == 0 ? current : current with { Entries = remaining };
+    }
+}
