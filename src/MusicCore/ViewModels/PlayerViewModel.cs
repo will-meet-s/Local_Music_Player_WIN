@@ -3,6 +3,7 @@ using MusicCore.Library;
 using MusicCore.Lyrics;
 using MusicCore.Models;
 using MusicCore.Playback;
+using MusicCore.Songlists;
 using MusicCore.Support;
 
 namespace MusicCore.ViewModels;
@@ -23,6 +24,10 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
     private readonly PlayerEngine _engine = new();
     private readonly Preferences _preferences;
 
+    /// <summary>T-011「存为歌单」需要。可选参数，默认 null：界面接入之前（等 MPC-388 验收），
+    /// 现有的无参构造调用（<c>App.xaml.cs</c>）不用改，也不会破坏 CI 的整个解决方案编译。</summary>
+    private readonly SonglistService? _songlistService;
+
     private CancellationTokenSource? _metadataCts;
 
     /// <summary>连续播放失败次数。用来避免整目录都是坏文件时无限自动跳曲。</summary>
@@ -38,8 +43,9 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
     private string? _preloadedPath;
     private int _preloadVersion;
 
-    public PlayerViewModel()
+    public PlayerViewModel(SonglistService? songlistService = null)
     {
+        _songlistService = songlistService;
         _preferences = Preferences.Load();
 
         _playMode = _preferences.PlayMode;
@@ -734,6 +740,43 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
         if (displayed.Count == 0) return;
 
         PlaySonglistAt(displayed, 0, name);
+    }
+
+    // MARK: - T-011：播放列表存为歌单
+
+    public bool CanSaveNowPlayingAsSonglist => NowPlaying.Items.Count > 0;
+
+    /// <summary>
+    /// 取播放列表当前快照（T-011 方案 v1 §7 易踩的坑）：必须在打开新建歌单对话框**之前**调用，
+    /// 界面层按「先取快照、后开对话框」的顺序调用这两个方法来保证——对话框打开期间播放列表
+    /// 又变了（比如自动切歌），保存的仍然是点击按钮那一刻的内容，不会读到之后的变化。
+    /// </summary>
+    public IReadOnlyList<Track> CaptureNowPlayingSnapshot() => NowPlaying.Items.ToList();
+
+    /// <summary>
+    /// 用户在新建歌单对话框里确定名称之后调用，<paramref name="snapshot"/> 是
+    /// <see cref="CaptureNowPlayingSnapshot"/> 取到的那份（T-011 方案 v1 §2）。
+    /// 只调用 <see cref="SonglistService.CreateWithTracksAsync"/>，不调用 <see cref="NowPlayingList"/>
+    /// 的任何修改方法——存歌单不算编辑，播放列表的状态、来源、当前曲目、播放都不变（FR-010）。
+    /// <para>
+    /// 名称类错误（<see cref="SonglistErrorCode.NameEmpty"/> 等）按 T-003 §2.3 的约定，
+    /// 要显示在对话框输入框下方、对话框不关闭，属于界面层职责，这里不经过
+    /// <see cref="ErrorMessage"/>——调用方直接读返回值的 <c>Error</c> 就能拿到错误码。
+    /// <see cref="SonglistErrorCode.SaveFailed"/> 才通过 <see cref="ErrorMessage"/> 提示。
+    /// </para>
+    /// </summary>
+    public async Task<SonglistResult<AddResult>> SaveSnapshotAsSonglistAsync(string name, IReadOnlyList<Track> snapshot)
+    {
+        if (_songlistService is null)
+            throw new InvalidOperationException("SaveSnapshotAsSonglistAsync 需要构造 PlayerViewModel 时传入 SonglistService");
+
+        var result = await _songlistService.CreateWithTracksAsync(name, snapshot);
+        if (result.Success)
+            Notice = $"已将播放列表存为歌单「{name}」（{result.Value!.Added} 首）";
+        else if (result.Error == SonglistErrorCode.SaveFailed)
+            ErrorMessage = "歌单保存失败，本次操作未生效";
+
+        return result;
     }
 
     // MARK: - T-008：播放列表编辑
