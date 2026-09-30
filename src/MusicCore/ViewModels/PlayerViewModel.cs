@@ -525,6 +525,12 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
         // 换了曲库，旧关键词多半一条都匹配不上，留着只会看到空列表
         SearchText = "";
 
+        // 独立状态下，RebuildDisplayed 不会调用 SyncFromLibrary（保持 Items 不动），所以队列的
+        // 选中状态要单独清掉——不然 Queue.Current 还停留在切换文件夹之前那首，和上面已经清空的
+        // PlayingTrack 对不上（T-009 方案 v1 §4.1）。跟随状态下不用管：RebuildDisplayed 会走
+        // SyncFromLibrary，playing 已经是 null，自然没有当前曲目
+        if (NowPlaying.State == NowPlayingState.Independent) NowPlaying.ClearCurrentSelection();
+
         _ = PerformScanAsync(folder, reportEmpty: true);
     }
 
@@ -567,6 +573,13 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
             Raise(nameof(Library));
             Raise(nameof(LibraryCount));
             RebuildDisplayed();
+
+            // 扫描完成后触发一次可用性检查（T-009 方案 v1 §2、T-007 §2.3）：独立状态下被删掉的
+            // 文件不会自动从 Items 里移除（FR-021 ①），要靠这一步标成不可用。跟随状态下曲库本身
+            // 就是最新的，这次检查大概率全部通过，但保持一致不用再区分状态。
+            // 「对当前打开的歌单也调用一次 Enqueue」（T-007 §2.3）留给界面接入阶段：PlayerViewModel
+            // 不持有当前打开的 SonglistDetailViewModel，界面层拿到扫描完成的信号后自己调用。
+            Availability.Enqueue(NowPlaying.Items, CheckPriority.High);
 
             if (_library.Count == 0 && reportEmpty)
                 ErrorMessage = "该文件夹下没有找到受支持的音频文件";

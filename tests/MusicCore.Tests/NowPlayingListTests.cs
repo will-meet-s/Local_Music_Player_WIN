@@ -78,6 +78,34 @@ public class NowPlayingListTests
         Assert.Equal(1, list.Queue.Current);
     }
 
+    // ClearCurrentSelection —— T-009 方案 v1 §4.1：独立状态下切换曲库文件夹时用
+
+    [Fact]
+    public void ClearCurrentSelection_IndependentState_ClearsCurrentButKeepsItems()
+    {
+        var list = new NowPlayingList(PlayMode.Sequential);
+        var snapshot = MakeTracks(6);
+        list.PlayFromSonglist(snapshot, 3, "通勤");
+
+        list.ClearCurrentSelection();
+
+        Assert.Null(list.Queue.Current);
+        Assert.Equal(6, list.Items.Count);
+        Assert.Equal(NowPlayingState.Independent, list.State);
+    }
+
+    [Fact]
+    public void ClearCurrentSelection_NoCurrentSelection_StaysNullWithoutThrowing()
+    {
+        var list = new NowPlayingList(PlayMode.Sequential);
+        list.PlayFromSonglist(MakeTracks(3), 0, "通勤");
+        list.ClearCurrentSelection();
+
+        list.ClearCurrentSelection();
+
+        Assert.Null(list.Queue.Current);
+    }
+
     // SyncFromLibrary —— 对照基线 RebuildDisplayed 的三种分支（设计方案 §7 测试 2）
 
     [Fact]

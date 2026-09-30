@@ -103,6 +103,12 @@ public sealed class NowPlayingList
     public void SelectInList(int index) => Queue.Select(index);
 
     /// <summary>
+    /// 清除当前选中项，不改变 <see cref="Items"/>（T-009 方案 v1 §4.1）：独立状态下切换曲库文件夹
+    /// 时用——列表内容保留，但没有当前曲目，接下来按「播放」从第一首开始放。
+    /// </summary>
+    public void ClearCurrentSelection() => Queue.ClearSelection();
+
+    /// <summary>
     /// 在歌单里点播（T-006 方案 v1 §2.1）：<see cref="Items"/> 整体替换为 <paramref name="snapshot"/>
     /// 的新副本，之后歌单的任何改动都不再通知播放列表（FR-025）——<c>ReplaceAll</c> 逐项拷贝进内部
     /// 存储，不持有调用方传入的这份集合引用。<paramref name="name"/> 是点播这一刻的歌单名快照，
