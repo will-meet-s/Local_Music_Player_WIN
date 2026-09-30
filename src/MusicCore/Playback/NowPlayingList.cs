@@ -384,12 +384,23 @@ public sealed class NowPlayingList
     }
 
     /// <summary>按 <see cref="TrackIdentity"/> 在 <see cref="Items"/> 里定位路径。规范化只做一次，避免每个元素都重新规范化两遍。</summary>
-    private int IndexOfPath(string path)
+    private int IndexOfPath(string path) => FindIndexByPath(_items, path) ?? -1;
+
+    /// <summary>
+    /// 按 <see cref="TrackIdentity"/> 在任意曲目列表里找路径对应的下标（T-010 方案 v2 §4.2）：
+    /// 独立状态恢复时，<c>PlayerViewModel.RestoreNowPlaying</c> 用它在刚解析出来的曲目列表里
+    /// 定位 <c>currentPath</c>；跟随状态恢复时，用它在扫描完成后的 <see cref="Items"/> 里定位
+    /// <c>_pendingFollowCurrent</c>。<paramref name="path"/> 为 null，或者找不到，都返回 null。
+    /// 公开成 <c>static</c> 方法是因为 <c>PlayerViewModel</c> 不能在单测里构造
+    /// （构造函数会触碰真实 <c>Preferences.Load()</c>），这部分纯逻辑只能这样测（方案 §7 单测 4）。
+    /// </summary>
+    public static int? FindIndexByPath(IReadOnlyList<Track> items, string? path)
     {
+        if (path is null) return null;
         var key = TrackIdentity.Normalize(path);
-        for (var i = 0; i < _items.Count; i++)
-            if (string.Equals(_items[i].IdentityKey, key, StringComparison.OrdinalIgnoreCase))
+        for (var i = 0; i < items.Count; i++)
+            if (string.Equals(items[i].IdentityKey, key, StringComparison.OrdinalIgnoreCase))
                 return i;
-        return -1;
+        return null;
     }
 }

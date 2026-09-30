@@ -189,4 +189,94 @@ public class NowPlayingListTests
         var single = Assert.Single(events);
         Assert.Equal(NotifyCollectionChangedAction.Reset, single.Action);
     }
+
+    // RestoreIndependent / FindIndexByPath —— T-010 方案 v2 §2.2、§4.2
+
+    [Fact]
+    public void RestoreIndependent_WithCurrentIndex_SetsStateSourceItemsAndSelection()
+    {
+        var list = new NowPlayingList(PlayMode.Sequential);
+        var items = MakeTracks(6);
+
+        list.RestoreIndependent(items, 3, NowPlayingSource.Songlist, "通勤");
+
+        Assert.Equal(NowPlayingState.Independent, list.State);
+        Assert.Equal(NowPlayingSource.Songlist, list.Source);
+        Assert.Equal("通勤", list.SourceName);
+        Assert.Equal(items, list.Items);
+        Assert.Equal(3, list.Queue.Current);
+    }
+
+    [Fact]
+    public void RestoreIndependent_CurrentIndexNull_NoSelectionButItemsKept()
+    {
+        var list = new NowPlayingList(PlayMode.Sequential);
+        var items = MakeTracks(4);
+
+        list.RestoreIndependent(items, null, NowPlayingSource.Edited, null);
+
+        Assert.Equal(4, list.Items.Count);
+        Assert.Null(list.Queue.Current);
+    }
+
+    [Fact]
+    public void RestoreIndependent_EmptyItems_RestoresAsIndependentEmptyList()
+    {
+        var list = new NowPlayingList(PlayMode.Sequential);
+
+        list.RestoreIndependent(Array.Empty<Track>(), null, NowPlayingSource.Edited, null);
+
+        Assert.Equal(NowPlayingState.Independent, list.State);
+        Assert.Empty(list.Items);
+        Assert.Null(list.Queue.Current);
+    }
+
+    // 方案 §7 单测 8 的核心逻辑：恢复出来的当前曲目就是 Queue.Current 本身，不需要调用
+    // Queue.Next() 才能定位到它——PlayerViewModel.TogglePlayPause 改成优先用 Queue.Current
+    // （而不是基线的 Queue.Next(false)）正是利用了这一点。PlayerViewModel 本身不能在单测里
+    // 构造（构造函数会触碰真实 Preferences.Load()），这是能单测到的部分。
+    [Fact]
+    public void RestoreIndependent_ThenQueueCurrent_PointsAtRestoredIndexWithoutCallingNext()
+    {
+        var list = new NowPlayingList(PlayMode.Sequential);
+        var items = MakeTracks(6);
+
+        list.RestoreIndependent(items, 3, NowPlayingSource.Songlist, "通勤");
+
+        Assert.Equal(3, list.Queue.Current);
+        // 如果播放键改成调用基线的 Queue.Next(false)，会跳到第 5 首（下标 4）而不是停在第 4 首（下标 3）
+        Assert.NotEqual(3, list.Queue.Next(auto: false));
+    }
+
+    // 方案 §7 单测 4：跟随状态恢复时，currentPath 已经不在新曲库里了 → 没有当前曲目
+
+    [Fact]
+    public void FindIndexByPath_PathPresent_ReturnsItsIndex()
+    {
+        var items = MakeTracks(5);
+
+        var index = NowPlayingList.FindIndexByPath(items, items[2].Path);
+
+        Assert.Equal(2, index);
+    }
+
+    [Fact]
+    public void FindIndexByPath_PathNoLongerPresent_ReturnsNull()
+    {
+        var items = MakeTracks(5);
+
+        var index = NowPlayingList.FindIndexByPath(items, @"C:\m\不在里面.mp3");
+
+        Assert.Null(index);
+    }
+
+    [Fact]
+    public void FindIndexByPath_NullPath_ReturnsNull()
+    {
+        var items = MakeTracks(5);
+
+        var index = NowPlayingList.FindIndexByPath(items, null);
+
+        Assert.Null(index);
+    }
 }

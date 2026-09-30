@@ -28,6 +28,20 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
     /// 现有的无参构造调用（<c>App.xaml.cs</c>）不用改，也不会破坏 CI 的整个解决方案编译。</summary>
     private readonly SonglistService? _songlistService;
 
+    // MARK: - T-010：重启恢复播放列表
+
+    private static readonly TimeSpan SaveDebounceDelay = TimeSpan.FromMilliseconds(500);
+    private static readonly TimeSpan FlushTimeout = TimeSpan.FromSeconds(2);
+
+    private readonly NowPlayingStore _nowPlayingStore = new(NowPlayingStore.DefaultPath);
+    private CancellationTokenSource? _saveDebounceCts;
+    private bool _saveFailureNotified;
+
+    /// <summary>跟随状态恢复时，扫描完成之前曲库还没准备好，先记下 currentPath，等
+    /// <see cref="RebuildDisplayed"/> 第一次跑完再去 <see cref="NowPlaying"/>.Items 里定位
+    /// （T-010 方案 v2 §4.2）。用掉之后清空，不会重复应用。</summary>
+    private string? _pendingFollowCurrent;
+
     private CancellationTokenSource? _metadataCts;
 
     /// <summary>连续播放失败次数。用来避免整目录都是坏文件时无限自动跳曲。</summary>
@@ -64,6 +78,7 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
             Raise(nameof(NowPlayingHeader));
             Raise(nameof(NowPlayingSourceText));
             Raise(nameof(CanSaveNowPlayingAsSonglist));
+            ScheduleSave();
         };
 
         _engine.Volume = _volume;
@@ -211,6 +226,10 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
         {
             if (!Set(ref _nowPlayingIndex, value)) return;
             Raise(nameof(NowPlayingHeader));
+            // 切歌（尤其是无缝自动切歌）不一定经过 NowPlaying.Changed（T-010 方案 v2 §2.3：
+            // HandleAutoAdvance 直接调 Queue.Next，不经过会触发 Changed 的 NowPlayingList 方法），
+            // 当前曲目本身就是要持久化的字段之一，所以在这里单独也触发一次去抖保存
+            ScheduleSave();
         }
     }
 
@@ -502,6 +521,75 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
         Scan(last);
     }
 
+    /// <summary>
+    /// 恢复上次退出时的播放列表（T-010 方案 v2 §2.3、§4.2）。
+    /// <para>
+    /// <b>必须在 <see cref="RestoreLastSession"/> 返回之后、在同一段同步代码里紧接着调用</b>
+    /// （两次调用之间不能有 <c>await</c>）：<see cref="Scan"/> 的同步部分会重置播放状态，独立状态下
+    /// 还会调用 <see cref="NowPlayingList.ClearCurrentSelection"/>（T-009）——如果反过来，先恢复、
+    /// 后扫描，刚恢复出来的当前曲目会被立刻清掉（v1 的设计缺陷，v2 改成了这个顺序）。
+    /// 跟随状态下不受影响：<see cref="PerformScanAsync"/> 是异步的，它完成之后的延续要等 UI 线程
+    /// 空出来才会执行，一定比本方法（同步）晚，<see cref="_pendingFollowCurrent"/> 来得及在
+    /// 扫描完成前设好。本方法自身也必须是同步的：<see cref="NowPlayingStore.Load"/> 和解析 Track
+    /// 都是同步操作。
+    /// </para>
+    /// </summary>
+    public void RestoreNowPlaying()
+    {
+        var snapshot = _nowPlayingStore.Load();
+        if (snapshot is null) return;
+
+        if (snapshot.State == NowPlayingState.Independent)
+        {
+            // 独立状态恢复时，Track 对象要先于曲库扫描登记进 Catalog（T-003 v3：同一路径只对应
+            // 一个对象）；此刻 RestoreLastSession 已经跑完，但曲库扫描本身是异步的，还没有把
+            // 这些路径的 Track 建出来，所以这里 Resolve 到的一定是新建的对象，扫描完成时会被复用
+            var items = snapshot.Items
+                .Select(i => Catalog.Resolve(i.Path, i.Title, i.Artist, i.Album, i.Duration))
+                .ToList();
+            var currentIndex = NowPlayingList.FindIndexByPath(items, snapshot.CurrentPath);
+
+            NowPlaying.RestoreIndependent(items, currentIndex, snapshot.Source, snapshot.SourceName);
+            NowPlayingIndex = NowPlaying.CurrentIndex ?? -1;
+
+            // 恢复出来的曲目可能已经不在了（FR-009 ①），交给 T-007 检查标出不可用
+            Availability.Enqueue(NowPlaying.Items, CheckPriority.High);
+        }
+        else
+        {
+            // 跟随状态：items 本来就是空数组（方案 §3），列表内容交给即将开始的曲库扫描去填；
+            // 只留下 currentPath，等 RebuildDisplayed 第一次跑完（走 SyncFromLibrary 之后）去定位
+            _pendingFollowCurrent = snapshot.CurrentPath;
+        }
+    }
+
+    /// <summary>
+    /// <c>MainWindow.Closed</c> 调用：取消还在等待的去抖，无条件同步保存一次，不管这次运行期间
+    /// 播放列表有没有变化过（FR-028 ④：以最后退出的窗口为准）。最多等 2 秒（方案 §4.1）——
+    /// <see cref="NowPlayingStore.SaveNow"/> 本身是同步阻塞的文件 IO，没有自带超时，这里用后台
+    /// 线程 + <see cref="Task.Wait(TimeSpan)"/> 兜底，避免磁盘卡住时无限期拖住退出流程。
+    /// </summary>
+    public void FlushNowPlaying()
+    {
+        _saveDebounceCts?.Cancel();
+        _saveDebounceCts?.Dispose();
+        _saveDebounceCts = null;
+
+        var snapshot = NowPlaying.ToSnapshot();
+        bool saved;
+        try
+        {
+            var task = Task.Run(() => _nowPlayingStore.SaveNow(snapshot));
+            saved = task.Wait(FlushTimeout) && task.Result;
+        }
+        catch (Exception e) when (e is AggregateException or ObjectDisposedException)
+        {
+            saved = false;
+        }
+
+        if (!saved) NotifySaveFailureOnce();
+    }
+
     /// <summary>切换到新文件夹：停止播放、清空搜索、从零重建曲库。</summary>
     public void Scan(string folder)
     {
@@ -679,6 +767,19 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
         // 独立状态下播放列表和队列都不动（T-001 设计方案 §4.1）
         if (NowPlaying.State == NowPlayingState.FollowLibrary)
             NowPlaying.SyncFromLibrary(Tracks, _playingTrack, previousNowPlayingIndex);
+
+        // 跟随状态恢复（T-010 方案 v2 §4.2）：RestoreNowPlaying 只记下了 currentPath，
+        // 曲库扫描完成、上面的 SyncFromLibrary 跑完之后，这里才第一次有机会在 Items 里定位它。
+        // playing 为 null 是这一步生效的前提——扫描期间用户已经自己点开别的歌时不应该被覆盖掉
+        if (_pendingFollowCurrent is { } pendingPath)
+        {
+            _pendingFollowCurrent = null;
+            if (NowPlaying.State == NowPlayingState.FollowLibrary && _playingTrack is null &&
+                NowPlayingList.FindIndexByPath(NowPlaying.Items, pendingPath) is { } foundIndex)
+            {
+                NowPlaying.SelectInList(foundIndex);
+            }
+        }
 
         NowPlayingIndex = NowPlaying.CurrentIndex ?? -1;
 
@@ -929,6 +1030,15 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
     {
         if (_playingTrack is null)
         {
+            // 有恢复出来的当前曲目、但引擎还没加载它（T-010 方案 v2 §2.3）：从它开始放，
+            // 而不是走下面 Queue.Next 跳到下一首——基线不会出现这种「有当前曲目但引擎没加载」
+            // 的状态，只有 T-010 的恢复流程会，所以不影响基线行为
+            if (NowPlaying.Queue.Current is not null)
+            {
+                StartCurrent();
+                return;
+            }
+
             // 还没选歌时，播放键等同于从头开始
             if (NowPlaying.Queue.Next(auto: false) is not null) StartCurrent();
             return;
@@ -988,6 +1098,49 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
             // 只记异常类型和 HResult；ErrorMessage 是给用户看的，仍然保留 e.Message
             SonglistService.Diagnostic?.Invoke("PlayerViewModel", $"[PlayerViewModel] {e.GetType().Name} 0x{e.HResult:X8}");
         }
+    }
+
+    /// <summary>
+    /// 播放列表内容、状态或当前曲目变化后调度一次去抖保存（T-010 方案 v2 §2.3、§4.1）：取消上一次
+    /// 还没触发的等待，只有最后一次 <see cref="ScheduleSave"/> 真正落地，500 毫秒内的连续变化
+    /// 只写一次盘。
+    /// </summary>
+    private void ScheduleSave()
+    {
+        _saveDebounceCts?.Cancel();
+        _saveDebounceCts?.Dispose();
+        var cts = new CancellationTokenSource();
+        _saveDebounceCts = cts;
+        Observe(SaveAfterDebounceAsync(cts.Token));
+    }
+
+    /// <summary>
+    /// 被取消（等待期间又发生了新的变化）时安静返回，不算错误，也不会被 <see cref="Observe"/>
+    /// 当成异常处理。保存失败（IOException 等）<see cref="NowPlayingStore.SaveAsync"/> 已经兜住了，
+    /// 不会抛出来，这里只看返回值走 FR-027 ③ 的提示逻辑。
+    /// </summary>
+    private async Task SaveAfterDebounceAsync(CancellationToken token)
+    {
+        try
+        {
+            await Task.Delay(SaveDebounceDelay, token);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        var saved = await _nowPlayingStore.SaveAsync(NowPlaying.ToSnapshot());
+        if (!saved) NotifySaveFailureOnce();
+    }
+
+    /// <summary>FR-027 ③：保存失败本次运行只提示一次，编辑照样生效，不打断播放；
+    /// 下一次变化时照常重试保存（不受这个标记影响，标记只管要不要弹提示）。</summary>
+    private void NotifySaveFailureOnce()
+    {
+        if (_saveFailureNotified) return;
+        _saveFailureNotified = true;
+        Notice = "播放列表未能保存，重启后可能无法恢复";
     }
 
     /// <summary>
@@ -1279,6 +1432,8 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
     {
         _metadataCts?.Cancel();
         _metadataCts?.Dispose();
+        _saveDebounceCts?.Cancel();
+        _saveDebounceCts?.Dispose();
         _engine.Dispose();
         Availability.Dispose();
     }
