@@ -63,6 +63,7 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
         {
             Raise(nameof(NowPlayingHeader));
             Raise(nameof(NowPlayingSourceText));
+            Raise(nameof(CanSaveNowPlayingAsSonglist));
         };
 
         _engine.Volume = _volume;
@@ -772,9 +773,10 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
 
         var result = await _songlistService.CreateWithTracksAsync(name, snapshot);
         if (result.Success)
-            Notice = $"已将播放列表存为歌单「{name}」（{result.Value!.Added} 首）";
+            // SonglistName 是保存后的名称（已经去掉首尾空白），不是调用方传入的原始 name（M-2）
+            Notice = $"已将播放列表存为歌单「{result.Value!.SonglistName}」（{result.Value.Added} 首）";
         else if (result.Error == SonglistErrorCode.SaveFailed)
-            ErrorMessage = "歌单保存失败，本次操作未生效";
+            ErrorMessage = SonglistNotices.ForSaveFailed(result.FailureReason!.Value);
 
         return result;
     }

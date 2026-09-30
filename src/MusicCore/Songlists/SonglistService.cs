@@ -92,8 +92,8 @@ public sealed class SonglistService
 
     public async Task<SonglistResult<SonglistSummary>> CreateAsync(string name)
     {
-        var (ok, applied, error) = await ExecuteAsync(new CreateOperation(name), SonglistChangeKind.Created);
-        if (!ok) return SonglistResult<SonglistSummary>.Fail(error!.Value);
+        var (ok, applied, error, failureReason) = await ExecuteAsync(new CreateOperation(name), SonglistChangeKind.Created);
+        if (!ok) return SonglistResult<SonglistSummary>.Fail(error!.Value, failureReason);
 
         var s = applied!;
         return SonglistResult<SonglistSummary>.Ok(new SonglistSummary(s.Id, s.Name, s.Entries.Count));
@@ -101,23 +101,23 @@ public sealed class SonglistService
 
     public async Task<SonglistResult> RenameAsync(Guid id, string name)
     {
-        var (ok, _, error) = await ExecuteAsync(new RenameOperation(id, name), SonglistChangeKind.Renamed);
-        return ok ? SonglistResult.Ok() : SonglistResult.Fail(error!.Value);
+        var (ok, _, error, failureReason) = await ExecuteAsync(new RenameOperation(id, name), SonglistChangeKind.Renamed);
+        return ok ? SonglistResult.Ok() : SonglistResult.Fail(error!.Value, failureReason);
     }
 
     /// <summary>调用前，界面层必须已经让用户确认过。</summary>
     public async Task<SonglistResult> DeleteAsync(Guid id)
     {
-        var (ok, _, error) = await ExecuteAsync(new DeleteOperation(id), SonglistChangeKind.Deleted);
-        return ok ? SonglistResult.Ok() : SonglistResult.Fail(error!.Value);
+        var (ok, _, error, failureReason) = await ExecuteAsync(new DeleteOperation(id), SonglistChangeKind.Deleted);
+        return ok ? SonglistResult.Ok() : SonglistResult.Fail(error!.Value, failureReason);
     }
 
     /// <summary>把 <paramref name="track"/> 挪到 <paramref name="toIndex"/>（T-005 方案 v1 §2）。
     /// 目标曲目已经不在歌单里、或者 <paramref name="toIndex"/> 就是它当前的位置时，不写盘，直接返回成功。</summary>
     public async Task<SonglistResult> MoveAsync(Guid id, Track track, int toIndex)
     {
-        var (ok, _, error) = await ExecuteAsync(new MoveTrackOperation(id, track, toIndex), SonglistChangeKind.EntriesChanged);
-        return ok ? SonglistResult.Ok() : SonglistResult.Fail(error!.Value);
+        var (ok, _, error, failureReason) = await ExecuteAsync(new MoveTrackOperation(id, track, toIndex), SonglistChangeKind.EntriesChanged);
+        return ok ? SonglistResult.Ok() : SonglistResult.Fail(error!.Value, failureReason);
     }
 
     /// <summary>把 <paramref name="tracks"/> 追加到歌单末尾（T-004 方案 v2 §2）。按曲目身份去重，
@@ -125,8 +125,8 @@ public sealed class SonglistService
     public async Task<SonglistResult<AddResult>> AddTracksAsync(Guid id, IReadOnlyList<Track> tracks)
     {
         var op = new AddTracksOperation(id, tracks);
-        var (ok, applied, error) = await ExecuteAsync(op, SonglistChangeKind.EntriesChanged);
-        if (!ok) return SonglistResult<AddResult>.Fail(error!.Value);
+        var (ok, applied, error, failureReason) = await ExecuteAsync(op, SonglistChangeKind.EntriesChanged);
+        if (!ok) return SonglistResult<AddResult>.Fail(error!.Value, failureReason);
 
         return SonglistResult<AddResult>.Ok(new AddResult(op.Added, op.Skipped, applied!.Name));
     }
@@ -135,8 +135,8 @@ public sealed class SonglistService
     /// 名称不合法时什么都不写。<see cref="AddResult.Skipped"/> 恒为 0。</summary>
     public async Task<SonglistResult<AddResult>> CreateWithTracksAsync(string name, IReadOnlyList<Track> tracks)
     {
-        var (ok, applied, error) = await ExecuteAsync(new CreateWithTracksOperation(name, tracks), SonglistChangeKind.Created);
-        if (!ok) return SonglistResult<AddResult>.Fail(error!.Value);
+        var (ok, applied, error, failureReason) = await ExecuteAsync(new CreateWithTracksOperation(name, tracks), SonglistChangeKind.Created);
+        if (!ok) return SonglistResult<AddResult>.Fail(error!.Value, failureReason);
 
         var s = applied!;
         return SonglistResult<AddResult>.Ok(new AddResult(s.Entries.Count, 0, s.Name));
@@ -147,8 +147,8 @@ public sealed class SonglistService
     public async Task<SonglistResult<int>> RemoveTracksAsync(Guid id, IReadOnlyList<Track> tracks)
     {
         var op = new RemoveTracksOperation(id, tracks);
-        var (ok, _, error) = await ExecuteAsync(op, SonglistChangeKind.EntriesChanged);
-        if (!ok) return SonglistResult<int>.Fail(error!.Value);
+        var (ok, _, error, failureReason) = await ExecuteAsync(op, SonglistChangeKind.EntriesChanged);
+        if (!ok) return SonglistResult<int>.Fail(error!.Value, failureReason);
 
         return SonglistResult<int>.Ok(op.Removed);
     }
@@ -157,8 +157,8 @@ public sealed class SonglistService
     /// （T-003 方案 v4 §4.4）。按曲目身份对齐，不改曲目和顺序；缓存字段其实没变化时不写盘。</summary>
     public async Task<SonglistResult> RefreshCacheAsync(Guid id, IReadOnlyList<Track> refreshedTracks)
     {
-        var (ok, _, error) = await ExecuteAsync(new RefreshCacheOperation(id, refreshedTracks), SonglistChangeKind.EntriesChanged);
-        return ok ? SonglistResult.Ok() : SonglistResult.Fail(error!.Value);
+        var (ok, _, error, failureReason) = await ExecuteAsync(new RefreshCacheOperation(id, refreshedTracks), SonglistChangeKind.EntriesChanged);
+        return ok ? SonglistResult.Ok() : SonglistResult.Fail(error!.Value, failureReason);
     }
 
     /// <summary>
@@ -168,7 +168,7 @@ public sealed class SonglistService
     /// <see cref="_songlists"/>/<see cref="_stamps"/>，避免和另一次调用的预校验读同一份字典时互相踩到。
     /// T-004、T-005 只需要新写一个 <see cref="ISonglistOperation"/> 实现即可接入。
     /// </summary>
-    private async Task<(bool Ok, Songlist? Applied, SonglistErrorCode? Error)> ExecuteAsync(ISonglistOperation op, SonglistChangeKind kind)
+    private async Task<(bool Ok, Songlist? Applied, SonglistErrorCode? Error, SaveFailureReason? FailureReason)> ExecuteAsync(ISonglistOperation op, SonglistChangeKind kind)
     {
         // 预校验：在内存目录上先跑一次，不通过就直接返回，不碰磁盘
         try
@@ -177,7 +177,7 @@ public sealed class SonglistService
         }
         catch (SonglistException e)
         {
-            return (false, null, e.Code);
+            return (false, null, e.Code, null);
         }
 
         await _gate.WaitAsync();
@@ -195,7 +195,7 @@ public sealed class SonglistService
                 Changed?.Invoke(new SonglistChange(kind, outcome.Applied?.Id ?? op.TargetId));
             }
 
-            return (outcome.Ok, outcome.Applied, outcome.Error);
+            return (outcome.Ok, outcome.Applied, outcome.Error, outcome.FailureReason);
         }
         finally
         {
@@ -204,7 +204,7 @@ public sealed class SonglistService
     }
 
     private readonly record struct DiskOutcome(
-        bool Ok, Songlist? Applied, SonglistErrorCode? Error,
+        bool Ok, Songlist? Applied, SonglistErrorCode? Error, SaveFailureReason? FailureReason,
         Dictionary<Guid, Songlist>? Fresh, Dictionary<Guid, FileStamp>? Stamps);
 
     /// <summary>
@@ -230,9 +230,9 @@ public sealed class SonglistService
             {
                 // 操作自身的目标歌单文件，恰好在这次同步里发现已损坏：按「已损坏」处理，不是单纯的 NotFound
                 if (e.Code == SonglistErrorCode.NotFound && op.TargetId is { } id && corruptedNow.Contains(id))
-                    return new DiskOutcome(false, null, SonglistErrorCode.SaveFailed, null, null);
+                    return new DiskOutcome(false, null, SonglistErrorCode.SaveFailed, SaveFailureReason.Other, null, null);
 
-                return new DiskOutcome(false, null, e.Code, null, null);
+                return new DiskOutcome(false, null, e.Code, null, null, null);
             }
 
             if (applied is null)
@@ -255,19 +255,29 @@ public sealed class SonglistService
                 applied = toSave;
             }
 
-            return new DiskOutcome(true, applied, null, fresh, stamps);
+            return new DiskOutcome(true, applied, null, null, fresh, stamps);
         }
         catch (TimeoutException)
         {
             Diagnostic?.Invoke("Songlist", $"[Songlist] Save {op.TargetId} TimeoutException 0x00000000");
-            return new DiskOutcome(false, null, SonglistErrorCode.SaveFailed, null, null);
+            return new DiskOutcome(false, null, SonglistErrorCode.SaveFailed, SaveFailureReason.Busy, null, null);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             Diagnostic?.Invoke("Songlist", $"[Songlist] Save {op.TargetId} {e.GetType().Name} 0x{e.HResult:X8}");
-            return new DiskOutcome(false, null, SonglistErrorCode.SaveFailed, null, null);
+            return new DiskOutcome(false, null, SonglistErrorCode.SaveFailed, ClassifyFailure(e), null, null);
         }
     }
+
+    /// <summary>把写盘失败的异常分类成 <see cref="SaveFailureReason"/>（T-003 方案 v7 §2.3），
+    /// 供 <see cref="SonglistNotices.ForSaveFailed"/> 拼出 FR-027 ① 要求的「{原因}」文字。</summary>
+    private static SaveFailureReason ClassifyFailure(Exception e) => e switch
+    {
+        UnauthorizedAccessException => SaveFailureReason.AccessDenied,
+        IOException io when io.HResult == unchecked((int)0x80070070) || io.HResult == unchecked((int)0x80070027) => SaveFailureReason.DiskFull,
+        IOException io when io.HResult == unchecked((int)0x80070020) || io.HResult == unchecked((int)0x80070021) => SaveFailureReason.Busy,
+        _ => SaveFailureReason.Other
+    };
 
     /// <summary>
     /// 只重新读取 (LastWriteTimeUtc, Length) 有变化、新出现或已消失的文件，在 <see cref="_songlists"/>/

@@ -263,6 +263,12 @@ public sealed class SonglistServiceTests : IDisposable
             Assert.False(result.Success);
             Assert.Equal(SonglistErrorCode.SaveFailed, result.Error);
             Assert.Equal("只读测试", service.GetAll().Single().Name);
+
+            // T-003 方案 v7 §2.3：只读触发的写盘失败要分类成 AccessDenied，
+            // 提示文字由 SonglistNotices.ForSaveFailed 统一生成，和分类表完全一致
+            Assert.Equal(SaveFailureReason.AccessDenied, result.FailureReason);
+            Assert.Equal("歌单保存失败：没有写入权限（数据目录或文件是只读的）。本次操作未生效",
+                SonglistNotices.ForSaveFailed(result.FailureReason!.Value));
         }
         finally
         {

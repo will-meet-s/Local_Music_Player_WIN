@@ -282,4 +282,14 @@ public sealed class SonglistNoticesTests
         var text = SonglistNotices.ForAdd(new AddResult(0, 2, "通勤"));
         Assert.Equal("2 首已存在，「通勤」没有变化", text);
     }
+
+    [Theory]
+    [InlineData(SaveFailureReason.AccessDenied, "歌单保存失败：没有写入权限（数据目录或文件是只读的）。本次操作未生效")]
+    [InlineData(SaveFailureReason.DiskFull, "歌单保存失败：磁盘空间不足。本次操作未生效")]
+    [InlineData(SaveFailureReason.Busy, "歌单保存失败：歌单文件正被其他程序或窗口占用。本次操作未生效")]
+    [InlineData(SaveFailureReason.Other, "歌单保存失败：写入磁盘时出错。本次操作未生效")]
+    public void ForSaveFailed_MatchesReasonTable(SaveFailureReason reason, string expected)
+    {
+        Assert.Equal(expected, SonglistNotices.ForSaveFailed(reason));
+    }
 }
