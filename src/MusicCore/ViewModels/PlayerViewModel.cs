@@ -984,7 +984,9 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
         catch (Exception e)
         {
             ErrorMessage = e.Message;
-            SonglistService.Diagnostic?.Invoke("PlayerViewModel", $"[PlayerViewModel] {e.GetType().Name} {e.Message}");
+            // 诊断日志不能带路径（T-003 §5）：e.Message 里可能有完整路径（比如 IOException），
+            // 只记异常类型和 HResult；ErrorMessage 是给用户看的，仍然保留 e.Message
+            SonglistService.Diagnostic?.Invoke("PlayerViewModel", $"[PlayerViewModel] {e.GetType().Name} 0x{e.HResult:X8}");
         }
     }
 

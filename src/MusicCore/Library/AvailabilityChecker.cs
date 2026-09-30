@@ -44,8 +44,13 @@ public sealed class AvailabilityChecker : IDisposable
     private readonly Task _worker;
 
     private readonly object _gate = new();
+    // 优先级队列用「Queue 记顺序 + Dictionary 记查找」的组合（T-007 复审 M-4）：Dictionary.Keys.First()
+    // 在删除元素后会扫描内部数组的空洞，连续取 n 个元素就是 O(n²)；改成 Queue 出队、Dictionary 懒删除
+    // （出队时这个 key 已经不在字典里，就跳过，说明它被 Cancel 挪走了或者升级到了高优先级），两者都是 O(1)。
     private readonly Dictionary<string, Track> _high = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Queue<string> _highOrder = new();
     private readonly Dictionary<string, Track> _low = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Queue<string> _lowOrder = new();
     private readonly Dictionary<string, (bool Reachable, DateTime CheckedAtUtc)> _rootCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<Track, bool> _pendingResults = new();
     private DateTime _lastFlushUtc = DateTime.MinValue;
@@ -70,10 +75,12 @@ public sealed class AvailabilityChecker : IDisposable
                 if (priority == CheckPriority.High)
                 {
                     _low.Remove(key);
+                    if (!_high.ContainsKey(key)) _highOrder.Enqueue(key);
                     _high[key] = track;
                 }
                 else if (!_high.ContainsKey(key))
                 {
+                    if (!_low.ContainsKey(key)) _lowOrder.Enqueue(key);
                     _low[key] = track;
                 }
             }
@@ -81,14 +88,19 @@ public sealed class AvailabilityChecker : IDisposable
     }
 
     /// <summary>离开页面时调用：把这一优先级里还没处理的曲目挪走，而不是丢掉——High 降级为 Low，
-    /// Low 直接清空（没有更低的优先级可以降）。</summary>
+    /// Low 直接清空（没有更低的优先级可以降）。挪走之后 <c>_highOrder</c> 里残留的 key 在
+    /// <see cref="TakeNext"/> 里会被懒删除跳过，不需要在这里同步清理。</summary>
     public void Cancel(CheckPriority priority)
     {
         lock (_gate)
         {
             if (priority == CheckPriority.High)
             {
-                foreach (var (key, track) in _high) _low.TryAdd(key, track);
+                foreach (var (key, track) in _high)
+                {
+                    if (!_low.ContainsKey(key)) _lowOrder.Enqueue(key);
+                    _low[key] = track;
+                }
                 _high.Clear();
             }
             else
@@ -152,22 +164,20 @@ public sealed class AvailabilityChecker : IDisposable
         FlushIfDue(force: true);
     }
 
-    /// <summary>调用方已持有 <see cref="_gate"/>。High 队列清空之后才取 Low。</summary>
+    /// <summary>调用方已持有 <see cref="_gate"/>。High 队列清空之后才取 Low；出队的 key 如果已经不在
+    /// 对应的 Dictionary 里（被 <see cref="Cancel"/> 挪走，或者从 Low 升级到了 High），就跳过——
+    /// 这就是 M-4 的懒删除，避免 <c>Dictionary.Keys.First()</c> 在有大量空洞时退化成 O(n²)。</summary>
     private Track? TakeNext()
     {
-        if (_high.Count > 0)
+        while (_highOrder.Count > 0)
         {
-            var key = _high.Keys.First();
-            var track = _high[key];
-            _high.Remove(key);
-            return track;
+            var key = _highOrder.Dequeue();
+            if (_high.Remove(key, out var track)) return track;
         }
-        if (_low.Count > 0)
+        while (_lowOrder.Count > 0)
         {
-            var key = _low.Keys.First();
-            var track = _low[key];
-            _low.Remove(key);
-            return track;
+            var key = _lowOrder.Dequeue();
+            if (_low.Remove(key, out var track)) return track;
         }
         return null;
     }
@@ -177,18 +187,25 @@ public sealed class AvailabilityChecker : IDisposable
         var root = GetRoot(track.Path);
         if (root is null) return _probe.FileExists(track.Path);
 
-        bool reachable;
+        // M-3：探测必须在锁外做——ProbeRoot 最多等 3 秒，锁里做 IO 会让 Enqueue/Cancel/CheckNowAsync
+        // （它们都在 UI 线程上跑）卡上同样长的时间。锁只用来查缓存、写缓存，两次探测撞在一起也没关系，
+        // 结果是一样的，多算一次不影响正确性。
+        bool? cachedReachable = null;
         lock (_gate)
         {
             if (_rootCache.TryGetValue(root, out var cached) && DateTime.UtcNow - cached.CheckedAtUtc < _rootCacheDuration)
-            {
-                reachable = cached.Reachable;
-            }
-            else
-            {
-                reachable = ProbeRoot(root);
-                _rootCache[root] = (reachable, DateTime.UtcNow);
-            }
+                cachedReachable = cached.Reachable;
+        }
+
+        bool reachable;
+        if (cachedReachable.HasValue)
+        {
+            reachable = cachedReachable.Value;
+        }
+        else
+        {
+            reachable = ProbeRoot(root);
+            lock (_gate) { _rootCache[root] = (reachable, DateTime.UtcNow); }
         }
 
         return reachable && _probe.FileExists(track.Path);

@@ -143,4 +143,62 @@ public sealed class AvailabilityCheckerTests
 
         Assert.True(ui.PostCount <= 11, $"投递到 UI 线程 {ui.PostCount} 次，超过了预期的 11 次");
     }
+
+    // M-3：探测根目录不能占着 _gate，否则 UI 线程上的 Enqueue/Cancel/CheckNowAsync 会跟着卡住
+
+    [Fact]
+    public async Task Enqueue_WhileWorkerIsProbingASlowRoot_ReturnsWithoutWaitingForProbeToFinish()
+    {
+        var probeStarted = new ManualResetEventSlim();
+        var probe = new FakeFileProbe
+        {
+            DirectoryExistsOverride = _ =>
+            {
+                probeStarted.Set();
+                Thread.Sleep(2000);
+                return true;
+            }
+        };
+        var ui = new ImmediateSyncContext();
+        using var checker = new AvailabilityChecker(ui, probe);
+
+        // 触发后台工作线程去探测这个根目录（会卡住 2 秒）
+        checker.Enqueue(new[] { new Track("/mnt/slow/a.mp3") }, CheckPriority.High);
+        Assert.True(probeStarted.Wait(TimeSpan.FromSeconds(1)), "后台线程应该已经进入探测");
+
+        // 这次 Enqueue 来自另一个「线程」（测试主线程），探测还没结束；如果 CheckOne 在锁里做 IO，
+        // 这次调用就会被 _gate 卡住，最多等到探测完成（2 秒）才能返回
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        checker.Enqueue(new[] { new Track("/mnt/slow/b.mp3") }, CheckPriority.Low);
+        sw.Stop();
+
+        Assert.True(sw.ElapsedMilliseconds < 50, $"Enqueue 耗时 {sw.ElapsedMilliseconds}ms，应该立即返回，不该等探测完成");
+    }
+
+    // M-4：TakeNext 改成 Queue + 懒删除之后，大量曲目也应该是线性时间，不能退化成 O(n²)
+
+    [Fact]
+    public async Task Enqueue_TwoHundredThousandTracks_ProcessesInLinearTimeNotQuadratic()
+    {
+        var probe = new FakeFileProbe();
+        var tracks = Enumerable.Range(0, 200_000).Select(i => new Track($"track-{i:D6}.mp3")).ToList();
+        // 一半存在、一半不存在：都会触发一次 IsAvailable 变化，用来判断处理是否已经全部完成
+        foreach (var t in tracks.Where((_, i) => i % 2 == 0)) probe.ExistingFiles.Add(t.Path);
+
+        var ui = new ImmediateSyncContext();
+        using var checker = new AvailabilityChecker(ui, probe);
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        checker.Enqueue(tracks, CheckPriority.Low);
+
+        var deadline = DateTime.UtcNow.AddSeconds(15);
+        while (DateTime.UtcNow < deadline && tracks.Any(t => t.IsAvailable != probe.ExistingFiles.Contains(t.Path)))
+            await Task.Delay(20);
+        sw.Stop();
+
+        foreach (var t in tracks)
+            Assert.Equal(probe.ExistingFiles.Contains(t.Path), t.IsAvailable);
+
+        Assert.True(sw.ElapsedMilliseconds < 1000, $"处理 20 万条耗时 {sw.ElapsedMilliseconds}ms，应该在 1 秒内完成（O(n²) 会远超这个时间）");
+    }
 }
