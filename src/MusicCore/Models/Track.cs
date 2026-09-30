@@ -93,6 +93,16 @@ public sealed class Track : IEquatable<Track>, INotifyPropertyChanged
     /// <summary>元数据是否已异步加载完成。重扫时用它跳过已读条目。</summary>
     public bool MetadataLoaded { get; set; }
 
+    private bool _isAvailable = true;
+
+    /// <summary>false 表示最近一次检查时文件不存在，或者它所在的根目录不可达。默认 true
+    /// （T-007 方案 v1 §2.1，FR-021 ⑥：检查完成之前按可用显示）。不做持久化。</summary>
+    public bool IsAvailable
+    {
+        get => _isAvailable;
+        internal set => Set(ref _isAvailable, value, nameof(IsAvailable));
+    }
+
     /// <summary>副标题：「艺术家 — 专辑」，缺失部分自动省略。</summary>
     public string Subtitle
     {

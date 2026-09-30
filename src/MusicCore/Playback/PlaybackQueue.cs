@@ -160,6 +160,52 @@ public sealed class PlaybackQueue
     }
 
     /// <summary>
+    /// 和 <see cref="PeekNext"/> 一样没有副作用（T-007 方案 v1 §2.5）。从当前位置往后模拟推进，
+    /// 每一步都按 <see cref="PeekNext"/> 同样的边界规则计算下一个候选下标，但最多走
+    /// <see cref="Count"/> 步，返回第一个满足 <paramref name="ok"/> 的下标；一直没有就返回 null。
+    /// 随机模式下走到一轮末尾就返回 null，不会模拟洗出下一轮——和 <see cref="PeekNext"/> 的已知
+    /// 限制一致，真正的洗牌要等切歌时才发生。<c>Current</c> 为 null 时只看 <see cref="PeekNext"/>
+    /// 本来会给出的那一个候选，不做多步模拟（这种情况只会在没有任何曲目在播时出现，
+    /// <see cref="ViewModels.PlayerViewModel.ProvideNext"/> 场景下用不到）。
+    /// </summary>
+    public int? PeekNextWhere(Func<int, bool> ok, bool auto)
+    {
+        if (Count == 0) return null;
+
+        if (Current is not { } c)
+        {
+            var target = _resumeAt is { } r ? PeekFromResumeAt(r) : ParkedTarget;
+            return target is { } t && ok(t) ? t : null;
+        }
+
+        if (auto && Mode == PlayMode.RepeatOne) return ok(c) ? c : null;
+
+        var pos = _position;
+        for (var step = 0; step < Count; step++)
+        {
+            int candidate;
+            if (pos + 1 < _order.Count)
+            {
+                pos++;
+                candidate = _order[pos];
+            }
+            else if (Mode is PlayMode.Sequential or PlayMode.Shuffle)
+            {
+                return null;
+            }
+            else
+            {
+                pos = 0;
+                candidate = _order.Count > 0 ? _order[0] : throw new InvalidOperationException("Count > 0 但顺序表是空的");
+            }
+
+            if (ok(candidate)) return candidate;
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// 下一首。
     /// </summary>
     /// <param name="auto">

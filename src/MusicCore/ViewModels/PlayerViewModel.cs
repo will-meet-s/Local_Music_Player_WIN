@@ -28,6 +28,10 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
     /// 现有的无参构造调用（<c>App.xaml.cs</c>）不用改，也不会破坏 CI 的整个解决方案编译。</summary>
     private readonly SonglistService? _songlistService;
 
+    /// <summary>T-007 失效曲目检查。自己创建、自己持有——不像 <see cref="_songlistService"/>
+    /// 那样需要跨界面共享同一个实例，所以不用走构造函数参数。</summary>
+    private readonly AvailabilityChecker _checker;
+
     private CancellationTokenSource? _metadataCts;
 
     /// <summary>连续播放失败次数。用来避免整目录都是坏文件时无限自动跳曲。</summary>
@@ -46,6 +50,7 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
     public PlayerViewModel(SonglistService? songlistService = null)
     {
         _songlistService = songlistService;
+        _checker = new AvailabilityChecker(SynchronizationContext.Current ?? new SynchronizationContext());
         _preferences = Preferences.Load();
 
         _playMode = _preferences.PlayMode;
@@ -701,19 +706,54 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
 
     // MARK: - 播放控制
 
-    public void PlayAt(int index)
+    /// <summary>点播前先检查是否可用（T-007 方案 v1 §2.4）：不可用就提示，其他什么都不做，
+    /// 当前播放和播放列表都不变。</summary>
+    public async Task PlayAt(int index)
     {
         if (index < 0 || index >= Tracks.Count) return;
+        if (!await EnsurePlayable(Tracks[index])) return;
+
         NowPlaying.PlayFromLibrary(Tracks, index);
         StartCurrent();
     }
 
-    /// <summary>在播放列表页里双击。</summary>
-    public void PlayNowPlayingAt(int index)
+    /// <summary>在播放列表页里双击。点播前先检查是否可用（T-007 方案 v1 §2.4）。</summary>
+    public async Task PlayNowPlayingAt(int index)
     {
         if (index < 0 || index >= NowPlaying.Items.Count) return;
+        if (!await EnsurePlayable(NowPlaying.Items[index])) return;
+
         NowPlaying.SelectInList(index);
         StartCurrent();
+    }
+
+    /// <summary>
+    /// 点播前检查是否可用（T-007 方案 v1 §6，供 T-006 复用）。不可用时设置
+    /// <see cref="ErrorMessage"/> 并返回 false，调用方据此判断直接返回、不改动当前播放和播放列表。
+    /// </summary>
+    public async Task<bool> EnsurePlayable(Track track)
+    {
+        if (await _checker.CheckNowAsync(track)) return true;
+
+        ErrorMessage = $"找不到该文件：{track.Path}";
+        return false;
+    }
+
+    /// <summary>从 <paramref name="start"/> 开始按 T-007 的规则往后找第一首可用的（T-006 的
+    /// <see cref="PlaySonglistAll"/> 用）。全部不可用时返回 null。</summary>
+    public Task<int?> FirstPlayableFrom(IReadOnlyList<Track> displayed, int start) =>
+        FirstPlayableFrom(_checker, displayed, start);
+
+    /// <summary>核心逻辑拆成 <c>internal static</c>、显式传入 <see cref="AvailabilityChecker"/>——
+    /// 不依赖 <see cref="PlayerViewModel"/> 就能单测（同 <see cref="ResolveAdvancedTrack"/> 的写法），
+    /// 覆盖 T-006 方案 v1 §7 单测 5「全部不可用」。</summary>
+    internal static async Task<int?> FirstPlayableFrom(AvailabilityChecker checker, IReadOnlyList<Track> displayed, int start)
+    {
+        for (var i = start; i < displayed.Count; i++)
+        {
+            if (await checker.CheckNowAsync(displayed[i])) return i;
+        }
+        return null;
     }
 
     // MARK: - T-006：歌单里点播
@@ -721,26 +761,34 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
     /// <summary>
     /// 在歌单详情页点播某一首（T-006 方案 v1 §2.2）。<paramref name="displayed"/> 是歌单详情页
     /// 当前显示的列表（含 T-012 歌单内搜索的结果），<paramref name="name"/> 是歌单名。
-    /// T-007 合入之前，"是否可用"一律按可用处理，所以这里不做可用性检查。
+    /// 点播前先按 T-007 检查是否可用：不可用就提示，其他什么都不做（FR-021 ④）。
     /// </summary>
-    public void PlaySonglistAt(IReadOnlyList<Track> displayed, int index, string name)
+    public async Task PlaySonglistAt(IReadOnlyList<Track> displayed, int index, string name)
     {
         if (index < 0 || index >= displayed.Count) return;
+        if (!await EnsurePlayable(displayed[index])) return;
 
         NowPlaying.PlayFromSonglist(displayed, index, name);
         StartCurrent();
     }
 
     /// <summary>
-    /// 歌单详情页「播放全部」（T-006 方案 v1 §2.2）：从第 0 首开始。
-    /// T-007 合入之前，"是否可用"一律按可用处理，所以总是从第 0 首开始，不需要往后找可用的曲目；
-    /// 全部不可用时提示并保持播放列表不变的分支要等 T-007 提供可用性检查之后才能实现。
+    /// 歌单详情页「播放全部」（T-006 方案 v1 §2.2）：从第 0 首开始；第 0 首不可用时，按 T-007 的
+    /// 规则往后找第一首可用的。全部不可用就提示「列表中的音频都无法播放，已停止」，并且不改变
+    /// 播放列表（T-006 方案 v1 §7 单测 5）。
     /// </summary>
-    public void PlaySonglistAll(IReadOnlyList<Track> displayed, string name)
+    public async Task PlaySonglistAll(IReadOnlyList<Track> displayed, string name)
     {
         if (displayed.Count == 0) return;
 
-        PlaySonglistAt(displayed, 0, name);
+        var index = await FirstPlayableFrom(displayed, 0);
+        if (index is null)
+        {
+            ErrorMessage = "列表中的音频都无法播放，已停止";
+            return;
+        }
+
+        await PlaySonglistAt(displayed, index.Value, name);
     }
 
     // MARK: - T-011：播放列表存为歌单
@@ -894,7 +942,7 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
             return;
         }
 
-        if (NowPlaying.Queue.Previous() is null) return;
+        if (RetreatSkippingUnavailable(NowPlaying.Queue, NowPlaying.Items) is null) return;
         StartCurrent();
     }
 
@@ -906,16 +954,81 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
 
     // MARK: - 内部流转
 
-    /// <summary>手动切歌。自动推进由引擎的无缝管线负责，不走这里。</summary>
+    /// <summary>
+    /// 手动切歌，以及自动播放出错、或者无缝管线里没有下一首（<c>QueueExhausted</c>）时的兜底推进。
+    /// 无缝切歌本身（<see cref="HandleAutoAdvance"/>）不走这里。跳过已知不可用的曲目
+    /// （T-007 方案 v1 §2.4、§4.1 第 3 步、§4.2）。
+    /// </summary>
     private void Advance(bool auto)
     {
-        if (NowPlaying.Queue.Next(auto) is null)
+        var outcome = AdvanceSkippingUnavailable(NowPlaying.Queue, NowPlaying.Items, auto);
+        if (outcome.Index is not null)
         {
-            // 顺序播放到达列表末尾
-            Stop();
+            StartCurrent();
             return;
         }
-        StartCurrent();
+
+        if (outcome.ExhaustedWithoutAvailable)
+        {
+            StopBecauseAllTracksUnavailable();
+            return;
+        }
+
+        // 顺序播放到达列表末尾（真正的 Queue.Next 返回了 null，不是"跳过不可用"耗尽了步数）
+        Stop();
+    }
+
+    /// <summary>
+    /// <see cref="Advance"/> 的返回结果（T-007 方案 v1 §4.1、§4.2）：<see cref="Index"/> 有值表示
+    /// 找到了一首可用的；<see cref="ExhaustedWithoutAvailable"/> 为 true 表示走满
+    /// <see cref="NowPlayingList.Items"/> 那么多步都没找到可用的（对应"全部不可用"），要和
+    /// "顺序播放自然到底"（<see cref="Index"/>、<see cref="ExhaustedWithoutAvailable"/> 都是默认值）
+    /// 区分开——后者只是安静地停止，不提示。
+    /// </summary>
+    internal readonly record struct AdvanceOutcome(int? Index, bool ExhaustedWithoutAvailable);
+
+    /// <summary>
+    /// 跳过已知不可用的曲目往前走（T-007 方案 v1 §4.1）：最多沿同一方向走
+    /// <paramref name="items"/>.Count 步。<paramref name="queue"/>.Next 本身返回 null（顺序播放到底、
+    /// 或者列表为空）时立即停下，视为自然到底，不是"全部不可用"。不改动 <paramref name="items"/>
+    /// 本身（①：不自动删除）。拆成 <c>internal static</c> 是为了不依赖 <see cref="PlayerViewModel"/>
+    /// 就能单测（同 <see cref="ResolveAdvancedTrack"/> 的写法）。
+    /// </summary>
+    internal static AdvanceOutcome AdvanceSkippingUnavailable(PlaybackQueue queue, IReadOnlyList<Track> items, bool auto)
+    {
+        for (var step = 0; step < items.Count; step++)
+        {
+            var next = queue.Next(auto);
+            if (next is null) return new AdvanceOutcome(null, false);
+            if (next.Value >= 0 && next.Value < items.Count && items[next.Value].IsAvailable)
+                return new AdvanceOutcome(next, false);
+        }
+        return new AdvanceOutcome(null, true);
+    }
+
+    /// <summary>往回切时跳过已知不可用的曲目（T-007 方案 v1 §4.1、§7 单测 2）：最多走
+    /// <paramref name="items"/>.Count 步；<paramref name="queue"/>.Previous 返回 null 就停下。</summary>
+    internal static int? RetreatSkippingUnavailable(PlaybackQueue queue, IReadOnlyList<Track> items)
+    {
+        for (var step = 0; step < items.Count; step++)
+        {
+            var prev = queue.Previous();
+            if (prev is null) return null;
+            if (prev.Value >= 0 && prev.Value < items.Count && items[prev.Value].IsAvailable) return prev;
+        }
+        return null;
+    }
+
+    /// <summary>连续失败达到一整轮，或者跳过不可用曲目也走满一整轮都没找到能播的
+    /// （T-007 方案 v1 §4.2）。只在真正触发的这一刻提示；引擎停下之后不会再自动触发下一次
+    /// Advance，所以不会重复提示（对应 TC-095：60 秒内只出现一次）。</summary>
+    private void StopBecauseAllTracksUnavailable()
+    {
+        ErrorMessage = "列表中的音频都无法播放，已停止";
+        _engine.Unload();
+        CurrentIndex = -1;
+        NowPlayingIndex = -1;
+        PlayingTrack = null;
     }
 
     private void StartCurrent()
@@ -1064,12 +1177,14 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
 
         // 引擎会提前把下一首解码好挂进管线以实现无缝切歌。
         // PeekNext 不能有副作用 —— 此刻当前曲还在播，队列位置不能动。
+        // 用 PeekNextWhere 跳过已知不可用的曲目（T-007 方案 v1 §2.4）。
         _engine.ProvideNext = () =>
         {
-            if (NowPlaying.Queue.PeekNext(auto: true) is not { } index) return null;
-            if (index < 0 || index >= NowPlaying.Items.Count) return null;
+            var items = NowPlaying.Items;
+            if (NowPlaying.Queue.PeekNextWhere(i => i >= 0 && i < items.Count && items[i].IsAvailable, auto: true) is not { } index)
+                return null;
 
-            var track = NowPlaying.Items[index];
+            var track = items[index];
             // E-2：记下预加载的是哪首、当时的列表版本，供 HandleAutoAdvance 判断编辑有没有作废它
             _preloadedPath = track.Path;
             _preloadVersion = _listVersion;
@@ -1078,15 +1193,7 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
 
         _engine.Advanced += HandleAutoAdvance;
 
-        _engine.QueueExhausted += () =>
-        {
-            // 管线里没有下一首了。顺序播放到底就是停；随机模式一轮播完时
-            // PeekNext 拿不到新顺序，此处补一次真正的推进。
-            if (NowPlaying.Queue.Next(auto: true) is { } next && next >= 0 && next < NowPlaying.Items.Count)
-                StartCurrent();
-            else
-                Stop();
-        };
+        _engine.QueueExhausted += () => Advance(auto: true);
 
         _engine.DurationResolved += seconds =>
         {
@@ -1095,8 +1202,18 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
             if (_playingTrack is { Duration: 0 } track) track.Duration = seconds;
         };
 
-        _engine.Error += message =>
+        _engine.Error += async message =>
         {
+            // T-007 方案 v1 §2.4：先看文件是不是还在，不在就标记为不可用——放到线程池执行、
+            // 最多等 1 秒，不能在这个回调（已经在 UI 线程上）里直接调用 File.Exists
+            if (_playingTrack is { } current)
+            {
+                bool stillExists;
+                try { stillExists = await Task.Run(() => File.Exists(current.Path)).WaitAsync(TimeSpan.FromSeconds(1)); }
+                catch (TimeoutException) { stillExists = false; }
+                if (!stillExists) current.IsAvailable = false;
+            }
+
             ErrorMessage = message;
             IsPlaying = false;
 
@@ -1105,11 +1222,7 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
             _consecutiveFailures++;
             if (_consecutiveFailures >= Math.Max(1, NowPlaying.Items.Count))
             {
-                ErrorMessage = "列表中的音频都无法播放，已停止";
-                _engine.Unload();
-                CurrentIndex = -1;
-                NowPlayingIndex = -1;
-                PlayingTrack = null;
+                StopBecauseAllTracksUnavailable();
                 return;
             }
 
@@ -1131,5 +1244,6 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
         _metadataCts?.Cancel();
         _metadataCts?.Dispose();
         _engine.Dispose();
+        _checker.Dispose();
     }
 }

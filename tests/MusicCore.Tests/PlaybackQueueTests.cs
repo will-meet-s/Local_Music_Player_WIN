@@ -582,4 +582,30 @@ public class PlaybackQueueTests
 
         Assert.Equal(new[] { 4, 5, 6 }, playedThisRound.OrderBy(x => x));
     }
+
+    // PeekNextWhere（T-007 方案 v1 §2.5、§7 单测 7）：和 PeekNext 一样没有副作用
+
+    [Fact]
+    public void PeekNextWhere_SkipsCandidatesNotMatchingPredicate_NoSideEffects()
+    {
+        var q = new PlaybackQueue(5, PlayMode.Sequential);
+        q.Select(1);
+
+        var result = q.PeekNextWhere(i => i == 3, auto: true);
+
+        Assert.Equal(3, result);
+        Assert.Equal(1, q.Current);
+    }
+
+    [Fact]
+    public void PeekNextWhere_NoMatchBeforeSequentialEnd_ReturnsNullWithNoSideEffects()
+    {
+        var q = new PlaybackQueue(3, PlayMode.Sequential);
+        q.Select(0);
+
+        var result = q.PeekNextWhere(_ => false, auto: true);
+
+        Assert.Null(result);
+        Assert.Equal(0, q.Current);
+    }
 }
