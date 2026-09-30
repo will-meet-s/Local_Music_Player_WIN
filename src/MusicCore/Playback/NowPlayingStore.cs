@@ -39,6 +39,20 @@ public sealed partial class NowPlayingStore
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
     });
 
+    /// <summary>残留的临时文件修改时间超过这个值才清理（SEC-03a，安全审计 2026-09-30）：
+    /// FR-028 ④ 允许同时开多个窗口，另一个窗口可能正在写它自己的临时文件，太快清理会删掉
+    /// 别人正在写的文件。</summary>
+    private static readonly TimeSpan StaleTempFileAge = TimeSpan.FromMinutes(1);
+
+    /// <summary>SEC-02（安全审计 2026-09-30）：保证「写临时文件 → 替换」同一时刻只有一次，
+    /// 避免去抖保存和退出保存共用同一个 <c>tmp-{pid}</c> 文件名时互相踩踏。</summary>
+    private readonly object _writeGate = new();
+
+    /// <summary>目前已经成功写盘的最大序号（SEC-02）。序号不大于它的保存请求，说明这份快照
+    /// 已经过时——可能是更早触发的去抖保存，在更晚的退出保存之后才真正写盘——直接跳过，
+    /// 不写盘，但仍然算「成功」（这次快照的内容反正已经被更新的快照覆盖过了）。</summary>
+    private long _lastWrittenSeq = long.MinValue;
+
     public NowPlayingStore(string filePath) => FilePath = filePath;
 
     public string FilePath { get; }
@@ -54,6 +68,8 @@ public sealed partial class NowPlayingStore
     /// </summary>
     public NowPlayingSnapshot? Load()
     {
+        CleanupStaleTempFiles();
+
         try
         {
             if (!File.Exists(FilePath)) return null;
@@ -67,45 +83,92 @@ public sealed partial class NowPlayingStore
         }
     }
 
-    /// <summary>后台保存用（去抖之后调用）。不抛异常：失败时返回 false。</summary>
-    public Task<bool> SaveAsync(NowPlayingSnapshot snapshot) => Task.Run(() => SaveCore(snapshot));
+    /// <summary>后台保存用（去抖之后调用）。不抛异常：失败时返回 false。<paramref name="seq"/>
+    /// 由调用方在取快照的同一时刻分配，单调递增（SEC-02）。</summary>
+    public Task<bool> SaveAsync(NowPlayingSnapshot snapshot, long seq) => Task.Run(() => SaveCore(snapshot, seq));
 
     /// <summary>退出时在 UI 线程上同步调用——退出事件处理完进程就结束了，异步保存可能来不及执行（方案 §7）。</summary>
-    public bool SaveNow(NowPlayingSnapshot snapshot) => SaveCore(snapshot);
+    public bool SaveNow(NowPlayingSnapshot snapshot, long seq) => SaveCore(snapshot, seq);
 
-    private bool SaveCore(NowPlayingSnapshot snapshot)
+    private bool SaveCore(NowPlayingSnapshot snapshot, long seq)
     {
-        try
+        lock (_writeGate)
         {
-            var directory = Path.GetDirectoryName(FilePath);
-            if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
-
-            var tmpPath = $"{FilePath}.tmp-{Environment.ProcessId}";
-            var json = Serialize(snapshot);
+            if (seq <= _lastWrittenSeq) return true;
 
             try
             {
-                WriteTempFile(tmpPath, json);
-                File.Move(tmpPath, FilePath, overwrite: true);
-            }
-            catch
-            {
-                TryDelete(tmpPath);
-                throw;
-            }
+                var directory = Path.GetDirectoryName(FilePath);
+                if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
 
-            return true;
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-        {
-            SonglistService.Diagnostic?.Invoke("NowPlaying", $"[NowPlaying] save {e.GetType().Name} 0x{e.HResult:X8}");
-            return false;
+                var tmpPath = $"{FilePath}.tmp-{Environment.ProcessId}";
+                var json = Serialize(snapshot);
+
+                try
+                {
+                    WriteTempFile(tmpPath, json);
+                    File.Move(tmpPath, FilePath, overwrite: true);
+                }
+                catch
+                {
+                    TryDelete(tmpPath);
+                    throw;
+                }
+
+                _lastWrittenSeq = seq;
+                return true;
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                SonglistService.Diagnostic?.Invoke("NowPlaying", $"[NowPlaying] save {e.GetType().Name} 0x{e.HResult:X8}");
+                return false;
+            }
         }
     }
 
+    /// <summary>SEC-03a：<c>nowplaying.json.tmp-{pid}</c> 在进程被杀时会残留——文件名带 pid，
+    /// 每次都不同，不会被后续保存覆盖，也没有清理，会一直占用磁盘。只删修改时间超过
+    /// <see cref="StaleTempFileAge"/> 的，删除失败按 SEC-01 的方式跳过，不影响本次加载。</summary>
+    private void CleanupStaleTempFiles()
+    {
+        var directory = Path.GetDirectoryName(FilePath);
+        if (string.IsNullOrEmpty(directory) || !Directory.Exists(directory)) return;
+
+        var fileName = Path.GetFileName(FilePath);
+        var cutoffUtc = DateTime.UtcNow - StaleTempFileAge;
+
+        List<string> tmpFiles;
+        try
+        {
+            tmpFiles = Directory.EnumerateFiles(directory, $"{fileName}.tmp-*").ToList();
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return;
+        }
+
+        foreach (var tmp in tmpFiles)
+        {
+            DateTime lastWriteUtc;
+            try
+            {
+                lastWriteUtc = File.GetLastWriteTimeUtc(tmp);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                continue;
+            }
+
+            if (lastWriteUtc < cutoffUtc) TryDelete(tmp);
+        }
+    }
+
+    /// <summary>SEC-01（安全审计 2026-09-30）：残留文件若是只读（例如从备份还原、被同步工具
+    /// 改了属性/ACL），<see cref="File.Delete(string)"/> 会抛 <see cref="UnauthorizedAccessException"/>，
+    /// 原来只接 <see cref="IOException"/>。删不掉就跳过，下次再试，不能让清理失败连累调用方。</summary>
     private static void TryDelete(string path)
     {
-        try { File.Delete(path); } catch (IOException) { /* 下次保存会覆盖，不用管 */ }
+        try { File.Delete(path); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
     }
 
     /// <summary>不加 <see cref="FileOptions.WriteThrough"/>，理由同 T-003 方案 v5 §4.2：

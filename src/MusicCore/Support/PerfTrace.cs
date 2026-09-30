@@ -82,7 +82,16 @@ public static class PerfTrace
         WriteLine(logPath, name, stopwatch.Elapsed.TotalMilliseconds);
     }
 
-    private static void WriteLine(string logPath, string name, double elapsedMilliseconds)
+    /// <summary>超过这个大小就轮转（SEC-03b，安全审计 2026-09-30）：<c>perf.log</c> 只追加、
+    /// 不轮转，开关长期开着会一直增长。</summary>
+    private const long DefaultMaxLogSizeBytes = 10 * 1024 * 1024;
+
+    private static void WriteLine(string logPath, string name, double elapsedMilliseconds) =>
+        WriteLine(logPath, name, elapsedMilliseconds, DefaultMaxLogSizeBytes);
+
+    /// <summary>核心逻辑抽出 <paramref name="maxLogSizeBytes"/> 参数，方便单测用小一点的值
+    /// 覆盖轮转分支，不用真写到 10 MB（SEC-03b）。</summary>
+    internal static void WriteLine(string logPath, string name, double elapsedMilliseconds, long maxLogSizeBytes)
     {
         var line = $"{DateTime.UtcNow:O}\t{name}\t{elapsedMilliseconds:F3}";
         try
@@ -91,6 +100,13 @@ public static class PerfTrace
             {
                 var directory = Path.GetDirectoryName(logPath);
                 if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
+
+                // 超过上限：把已有内容挪成 .old（覆盖上一次的 .old），再往一个新的空文件里追加，
+                // 而不是无限增长下去
+                var info = new FileInfo(logPath);
+                if (info.Exists && info.Length > maxLogSizeBytes)
+                    File.Move(logPath, logPath + ".old", overwrite: true);
+
                 File.AppendAllText(logPath, line + Environment.NewLine);
             }
         }

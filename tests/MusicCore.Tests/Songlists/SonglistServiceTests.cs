@@ -411,4 +411,36 @@ public sealed class SonglistServiceTests : IDisposable
 
         Assert.True(File.Exists(strayTmp));
     }
+
+    // SEC-01（安全审计 2026-09-30）：残留的临时文件删不掉（这里用只读模拟）时，不能连累其他歌单的加载
+
+    [Fact]
+    public async Task LoadAllAsync_ReadOnlyLeftoverTempFile_DoesNotFailOtherSonglists()
+    {
+        Directory.CreateDirectory(_dir);
+
+        var goodId = Guid.NewGuid();
+        File.WriteAllText(Path.Combine(_dir, $"{goodId:N}.json"), ValidJson(goodId, "好的"));
+
+        var staleTmpPath = Path.Combine(_dir, "x.json.tmp-999");
+        File.WriteAllText(staleTmpPath, "残留的临时文件");
+        // FileAttributes.ReadOnly 在 Linux 上不生效（File.Delete 照样能删掉只读文件），这里测不到
+        // UnauthorizedAccessException 这条路径本身，以 CI（Windows）为准；但不管删没删掉，
+        // 结论在两个平台上都应该一样：不影响其他歌单加载
+        File.SetAttributes(staleTmpPath, FileAttributes.ReadOnly);
+
+        try
+        {
+            var service = NewService();
+            var report = await service.LoadAllAsync();
+
+            Assert.Equal(1, report.Loaded);
+            Assert.Empty(report.Failed);
+            Assert.Equal("好的", service.GetAll().Single().Name);
+        }
+        finally
+        {
+            if (File.Exists(staleTmpPath)) File.SetAttributes(staleTmpPath, FileAttributes.Normal);
+        }
+    }
 }

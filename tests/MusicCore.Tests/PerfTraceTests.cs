@@ -112,4 +112,32 @@ public sealed class PerfTraceTests : IDisposable
 
         Assert.Single(File.ReadAllLines(_logPath));
     }
+
+    // SEC-03b（安全审计 2026-09-30）：perf.log 只追加不轮转，长期开着会一直增长；上限设为 1 KB，
+    // 连续写到超过上限：出现 perf.log.old，新的 perf.log 只有最新的那一行
+
+    [Fact]
+    public void WriteLine_ExceedsSizeLimit_RotatesToOldFileAndStartsFresh()
+    {
+        const long limitBytes = 1024;
+        var oldPath = _logPath + ".old";
+
+        try
+        {
+            // 预先写入一份超过上限的内容，模拟开关长期开着、perf.log 已经积累超过上限的情况
+            File.WriteAllText(_logPath, new string('x', (int)limitBytes + 1));
+
+            PerfTrace.WriteLine(_logPath, "latest", 1.0, limitBytes);
+
+            Assert.True(File.Exists(oldPath), "超过上限之后应该出现 perf.log.old");
+
+            var remaining = File.ReadAllLines(_logPath);
+            var single = Assert.Single(remaining);
+            Assert.Contains("latest", single);
+        }
+        finally
+        {
+            try { File.Delete(oldPath); } catch (IOException) { }
+        }
+    }
 }

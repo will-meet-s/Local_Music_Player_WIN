@@ -37,6 +37,14 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
     private CancellationTokenSource? _saveDebounceCts;
     private bool _saveFailureNotified;
 
+    /// <summary>
+    /// SEC-02（安全审计 2026-09-30）：去抖保存和退出保存都在后台线程上执行真正的写盘，
+    /// 谁先拿到 <see cref="NowPlayingStore"/> 内部的锁、谁先写完，不代表谁的快照更新。
+    /// 每次在 UI 线程上取快照时递增一次，随快照一起传给 <see cref="NowPlayingStore.SaveAsync"/>/
+    /// <see cref="NowPlayingStore.SaveNow"/>；写盘按这个序号判断新旧，不按完成顺序。
+    /// </summary>
+    private long _snapshotSeq;
+
     /// <summary>跟随状态恢复时，扫描完成之前曲库还没准备好，先记下 currentPath，等
     /// <see cref="RebuildDisplayed"/> 第一次跑完再去 <see cref="NowPlaying"/>.Items 里定位
     /// （T-010 方案 v2 §4.2）。用掉之后清空，不会重复应用。</summary>
@@ -607,11 +615,11 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
         _saveDebounceCts?.Dispose();
         _saveDebounceCts = null;
 
-        var snapshot = NowPlaying.ToSnapshot();
+        var (snapshot, seq) = CaptureSnapshotForSave();
         bool saved;
         try
         {
-            var task = Task.Run(() => _nowPlayingStore.SaveNow(snapshot));
+            var task = Task.Run(() => _nowPlayingStore.SaveNow(snapshot, seq));
             saved = task.Wait(FlushTimeout) && task.Result;
         }
         catch (Exception e) when (e is AggregateException or ObjectDisposedException)
@@ -1162,9 +1170,15 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
             return;
         }
 
-        var saved = await _nowPlayingStore.SaveAsync(NowPlaying.ToSnapshot());
+        var (snapshot, seq) = CaptureSnapshotForSave();
+        var saved = await _nowPlayingStore.SaveAsync(snapshot, seq);
         if (!saved) NotifySaveFailureOnce();
     }
+
+    /// <summary>在 UI 线程上把「取快照」和「分配序号」绑成一步（SEC-02）：谁最后调用这个方法，
+    /// 谁的序号最大，<see cref="NowPlayingStore"/> 只认序号，不认两次写盘谁先完成。</summary>
+    private (NowPlayingSnapshot Snapshot, long Seq) CaptureSnapshotForSave() =>
+        (NowPlaying.ToSnapshot(), ++_snapshotSeq);
 
     /// <summary>FR-027 ③：保存失败本次运行只提示一次，编辑照样生效，不打断播放；
     /// 下一次变化时照常重试保存（不受这个标记影响，标记只管要不要弹提示）。</summary>

@@ -218,7 +218,11 @@ internal sealed partial class SonglistStore
 
     private static void TryDelete(string path)
     {
-        try { File.Delete(path); } catch (IOException) { /* 下次启动清理时再试 */ }
+        // SEC-01（安全审计 2026-09-30）：残留的临时文件若是只读（例如从备份还原、被同步工具
+        // 改了属性/ACL），File.Delete 会抛 UnauthorizedAccessException，原来只接 IOException，
+        // 会冒到 LoadAll 外层 catch，导致整次加载判定为失败，波及本来能正常读出来的其他歌单。
+        // 删不掉就跳过，下次启动再试，不能让清理失败连累本次加载。
+        try { File.Delete(path); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
     }
 
     /// <summary>

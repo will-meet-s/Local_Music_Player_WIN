@@ -35,7 +35,7 @@ public sealed class NowPlayingStoreTests : IDisposable
         list.PlayFromSonglist(snapshot6, 2, "通勤");
 
         var store = new NowPlayingStore(_path);
-        Assert.True(store.SaveNow(list.ToSnapshot()));
+        Assert.True(store.SaveNow(list.ToSnapshot(), seq: 1));
 
         var loaded = store.Load();
 
@@ -58,7 +58,7 @@ public sealed class NowPlayingStoreTests : IDisposable
         list.PlayFromSonglist(snapshot6, 2, "通勤");
 
         var store = new NowPlayingStore(_path);
-        store.SaveNow(list.ToSnapshot());
+        store.SaveNow(list.ToSnapshot(), seq: 1);
         var loaded = store.Load()!;
 
         // 模拟 PlayerViewModel.RestoreNowPlaying：按 loaded.Items 的路径重建 Track（这里直接用原对象，
@@ -87,7 +87,7 @@ public sealed class NowPlayingStoreTests : IDisposable
         list.Clear();
 
         var store = new NowPlayingStore(_path);
-        store.SaveNow(list.ToSnapshot());
+        store.SaveNow(list.ToSnapshot(), seq: 1);
         var loaded = store.Load();
 
         Assert.NotNull(loaded);
@@ -125,8 +125,10 @@ public sealed class NowPlayingStoreTests : IDisposable
         var storeA = new NowPlayingStore(_path);
         var storeB = new NowPlayingStore(_path);
 
-        Assert.True(storeA.SaveNow(listA.ToSnapshot()));
-        Assert.True(storeB.SaveNow(listB.ToSnapshot()));
+        // 两个独立的 Store 实例（对应两个不同窗口/进程各自的 _lastWrittenSeq），
+        // 序号只在各自实例内部有意义，这里用 1 就够，不涉及 SEC-02 的新旧判断
+        Assert.True(storeA.SaveNow(listA.ToSnapshot(), seq: 1));
+        Assert.True(storeB.SaveNow(listB.ToSnapshot(), seq: 1));
 
         var loaded = new NowPlayingStore(_path).Load();
 
@@ -161,5 +163,78 @@ public sealed class NowPlayingStoreTests : IDisposable
         var loaded = new NowPlayingStore(_path).Load();
 
         Assert.Null(loaded);
+    }
+
+    private static NowPlayingSnapshot MakeSnapshot(string sourceName) =>
+        new(NowPlayingState.Independent, NowPlayingSource.Songlist, sourceName, null, Array.Empty<NowPlayingSnapshotItem>(), DateTime.UtcNow);
+
+    // SEC-02 ①（安全审计 2026-09-30）：去抖保存和退出保存共用同一个 tmp-{pid} 文件名，
+    // 两个线程同时 SaveNow 时，加锁之前会有共享冲突；加锁之后文件应该完整、不会写坏
+
+    [Fact]
+    public void SaveNow_CalledConcurrentlyFromTwoThreads_BothSucceedAndFileStaysIntact()
+    {
+        var store = new NowPlayingStore(_path);
+        var snapshotA = MakeSnapshot("A");
+        var snapshotB = MakeSnapshot("B");
+
+        bool resultA = false, resultB = false;
+        var threadA = new Thread(() => resultA = store.SaveNow(snapshotA, seq: 1));
+        var threadB = new Thread(() => resultB = store.SaveNow(snapshotB, seq: 2));
+
+        threadA.Start();
+        threadB.Start();
+        threadA.Join();
+        threadB.Join();
+
+        Assert.True(resultA, "加锁之后不应该出现共享冲突导致的失败");
+        Assert.True(resultB, "加锁之后不应该出现共享冲突导致的失败");
+
+        var loaded = store.Load();
+        Assert.NotNull(loaded);
+        Assert.True(loaded!.SourceName is "A" or "B");
+    }
+
+    // SEC-02 ②：先 SaveNow(新, 2)，再 SaveNow(旧, 1)：文件内容是「新」的那份，第二次返回 true
+
+    [Fact]
+    public void SaveNow_OlderSeqAfterNewerSeq_KeepsNewerContentAndReturnsTrueWithoutOverwriting()
+    {
+        var store = new NowPlayingStore(_path);
+        var newer = MakeSnapshot("新");
+        var older = MakeSnapshot("旧");
+
+        Assert.True(store.SaveNow(newer, seq: 2));
+        Assert.True(store.SaveNow(older, seq: 1)); // 过时的快照，直接返回 true，不写盘
+
+        var loaded = store.Load();
+        Assert.Equal("新", loaded!.SourceName);
+    }
+
+    // SEC-03a：一个 2 分钟前的临时文件被删掉，一个刚写的临时文件保留
+
+    [Fact]
+    public void Load_StaleTempFileOlderThanOneMinute_IsDeletedButRecentOneIsKept()
+    {
+        var directory = Path.GetDirectoryName(_path)!;
+        Directory.CreateDirectory(directory);
+
+        var stalePath = _path + ".tmp-111";
+        var recentPath = _path + ".tmp-222";
+        File.WriteAllText(stalePath, "stale");
+        File.WriteAllText(recentPath, "recent");
+        File.SetLastWriteTimeUtc(stalePath, DateTime.UtcNow.AddMinutes(-2));
+
+        try
+        {
+            new NowPlayingStore(_path).Load();
+
+            Assert.False(File.Exists(stalePath), "超过 1 分钟的临时文件应该被清理掉");
+            Assert.True(File.Exists(recentPath), "1 分钟以内的临时文件可能是另一个窗口正在写的，不能删");
+        }
+        finally
+        {
+            try { File.Delete(recentPath); } catch (IOException) { }
+        }
     }
 }
