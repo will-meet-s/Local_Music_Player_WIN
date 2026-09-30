@@ -147,13 +147,21 @@ public class NowPlayingListEditTests
     }
 
     // 测试 9：随机模式，插入的歌紧接着播，本轮已播过的不会重复出现
+    // 先顺序播放构造，再切到随机模式（切换时当前曲目挪到洗牌顺序表首位，本轮 = 完整 6 首）——
+    // 不能直接在随机模式下 PlayFromLibrary(tracks, 0)：第 0 首在洗牌顺序里的位置是随机的，
+    // 可能已经接近本轮末尾，接下来两次 Next 就可能跨进下一轮甚至让 X、Y 变成同一首。
+    // 另外，seenThisRound 要把本轮已经放过的全部曲目（起点、X、Y、新插入的曲目）都种进去——
+    // 漏掉任何一个的话，走到本轮末尾触发重新洗牌时，新一轮凑巧又抽到那一首，判重会漏判，
+    // 直接命中下面的 NotEqual 断言，而不是干净地跳出循环（复审 2026-09-30 定位）
 
     [Fact]
     public void PlayNext_ShuffleMode_InsertedTrackPlaysNextAndRoundNeverRepeats()
     {
-        var list = new NowPlayingList(PlayMode.Shuffle);
+        var list = new NowPlayingList(PlayMode.Sequential);
         var tracks = MakeTracks(6);
         list.PlayFromLibrary(tracks, 0);
+        var trackStart = list.Items[0];
+        list.Queue.Mode = PlayMode.Shuffle;
 
         // 走两步：第一步之后是「X」，第二步之后是「Y」——Y 同时也是调用 PlayNext 时的当前曲目（Z）
         var trackX = list.Items[list.Queue.Next(auto: true)!.Value];
@@ -165,7 +173,7 @@ public class NowPlayingListEditTests
         var nextIndex = list.Queue.Next(auto: true)!.Value;
         Assert.Equal(newTrack, list.Items[nextIndex]);
 
-        var seenThisRound = new HashSet<Track> { newTrack };
+        var seenThisRound = new HashSet<Track> { trackStart, trackX, trackY, newTrack };
         for (var i = 0; i < list.Items.Count; i++)
         {
             var idx = list.Queue.Next(auto: true);
@@ -221,19 +229,29 @@ public class NowPlayingListEditTests
     }
 
     // 测试 12：随机模式，挪动一首已经放过的歌，它在本轮里重新变得可播放
+    // 先用顺序播放构造，再切到随机模式（基线规则：切换时把当前曲目挪到洗牌顺序表首位，
+    // 本轮因此正好是完整的 6 首）——不能直接在随机模式下 PlayFromLibrary(tracks, 0)，那样
+    // 第 0 首在洗牌顺序里的位置是随机的，可能已经接近本轮末尾，X、Y 两次 Next 就可能跨进
+    // 下一轮，甚至让 X、Y 变成同一首，使断言偶发失败。
+    // 目标位置也不能硬编码成「末尾」：NowPlayingList.Move 在 from == to 时直接判定为不用改动、
+    // 提前 return（对应生产代码 Move 的空操作优化），X 洗牌之后凑巧本来就在末尾时，Move 就成了
+    // 空操作，X 根本没有被挪动，后面自然找不到它重新出现——目标位置要和 X 当前位置错开
+    // （复审 2026-09-30 定位）
 
     [Fact]
     public void Move_ShuffleMode_RelocatedAlreadyPlayedTrack_BecomesEligibleAgainThisRound()
     {
-        var list = new NowPlayingList(PlayMode.Shuffle);
+        var list = new NowPlayingList(PlayMode.Sequential);
         var tracks = MakeTracks(6);
         list.PlayFromLibrary(tracks, 0);
+        list.Queue.Mode = PlayMode.Shuffle;
 
         var trackX = list.Items[list.Queue.Next(auto: true)!.Value];
         var trackY = list.Items[list.Queue.Next(auto: true)!.Value];
 
         var xIndexBeforeMove = list.Items.ToList().IndexOf(trackX);
-        list.Move(xIndexBeforeMove, tracks.Length - 1);
+        var moveTarget = xIndexBeforeMove == tracks.Length - 1 ? 0 : tracks.Length - 1;
+        list.Move(xIndexBeforeMove, moveTarget);
 
         var seenThisRound = new HashSet<Track>();
         Track? reappeared = null;
