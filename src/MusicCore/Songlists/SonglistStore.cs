@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace MusicCore.Songlists;
 
@@ -33,18 +34,25 @@ internal sealed class SonglistLoadResult
 /// <summary>
 /// 只管磁盘读写：加载全部文件、跨进程锁、原子写、删除。不包含业务规则（T-003 方案 §2.1）。
 /// </summary>
-internal sealed class SonglistStore
+internal sealed partial class SonglistStore
 {
     private const int SchemaVersion = 1;
     private const string LockFileName = ".lock";
     private const int SharingViolationHResult = unchecked((int)0x80070020);
 
-    private static readonly JsonSerializerOptions JsonOptions = new()
+    /// <summary>
+    /// 序列化改走源生成（T-003 方案 v4 §3.2）：省掉第一次序列化 <see cref="SonglistFileDto"/> 时
+    /// 生成反射元数据的开销，对单文件发布也更友好。<see cref="JsonSerializerOptions.Encoder"/> 不是
+    /// <see cref="JsonSourceGenerationOptionsAttribute"/> 能表达的选项，所以走带参数的构造函数，
+    /// 把自定义的 <see cref="JsonSerializerOptions"/> 和源生成的类型元数据组合起来，而不是用
+    /// <c>SonglistJsonContext.Default</c>。
+    /// </summary>
+    private static readonly SonglistJsonContext JsonContext = new(new JsonSerializerOptions
     {
         WriteIndented = false,
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
-    };
+    });
 
     /// <summary>
     /// 构造函数不做任何 IO（R-2）：数据目录不可写时，不应该在这里就让整个服务构造失败、
@@ -224,7 +232,7 @@ internal sealed class SonglistStore
 
     private static Songlist Parse(string json, string fileNameWithoutExtension)
     {
-        var dto = JsonSerializer.Deserialize<SonglistFileDto>(json, JsonOptions)
+        var dto = JsonSerializer.Deserialize(json, JsonContext.SonglistFileDto)
             ?? throw new InvalidDataException("空文档");
 
         if (dto.SchemaVersion != SchemaVersion)
@@ -265,7 +273,12 @@ internal sealed class SonglistStore
                 Duration = e.Duration
             }).ToList()
         };
-        return JsonSerializer.Serialize(dto, JsonOptions);
+        return JsonSerializer.Serialize(dto, JsonContext.SonglistFileDto);
+    }
+
+    [JsonSerializable(typeof(SonglistFileDto))]
+    private sealed partial class SonglistJsonContext : JsonSerializerContext
+    {
     }
 
     private sealed class SonglistFileDto

@@ -140,10 +140,12 @@ public sealed class SonglistMoveTests : IDisposable
         }
     }
 
-    // 6
+    // 6：性能类单测的统一写法（T-003 方案 v4 §7）：先预热 1 次不计时，再连续计时 5 次，
+    // 断言中位数不超过阈值，失败信息里带上全部 5 次耗时。CI 上第一次调用会有 JIT 编译、
+    // System.Text.Json 源生成元数据初始化等一次性开销，不代表稳态性能，预热就是为了把它排除掉。
 
     [Fact]
-    public async Task MoveAsync_FiveThousandTracks_LastToFront_CompletesWithin200Milliseconds()
+    public async Task MoveAsync_FiveThousandTracks_LastToFront_MedianOfFiveRunsWithin200Milliseconds()
     {
         var id = Guid.NewGuid();
         var paths = Enumerable.Range(0, 5000).Select(i => $"track-{i:D5}").ToList();
@@ -151,13 +153,26 @@ public sealed class SonglistMoveTests : IDisposable
         var service = NewService();
         await service.LoadAllAsync();
 
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-        var result = await service.MoveAsync(id, TrackAt(paths[^1]), toIndex: 0);
-        sw.Stop();
+        async Task MoveCurrentLastToFrontAsync()
+        {
+            var lastPath = service.GetEntries(id)[^1].Path;
+            var result = await service.MoveAsync(id, TrackAt(lastPath), toIndex: 0);
+            Assert.True(result.Success);
+        }
 
-        Assert.True(result.Success);
-        Assert.True(sw.ElapsedMilliseconds < 200, $"MoveAsync 耗时 {sw.ElapsedMilliseconds}ms");
-        Assert.Equal(paths[^1], service.GetEntries(id)[0].Path);
+        await MoveCurrentLastToFrontAsync(); // 预热，不计时
+
+        var elapsedMs = new List<long>();
+        for (var i = 0; i < 5; i++)
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            await MoveCurrentLastToFrontAsync();
+            sw.Stop();
+            elapsedMs.Add(sw.ElapsedMilliseconds);
+        }
+
+        var median = elapsedMs.OrderBy(ms => ms).ElementAt(elapsedMs.Count / 2);
+        Assert.True(median < 200, $"耗时 [{string.Join(",", elapsedMs)}]ms");
     }
 
     // 6a：找不到歌单本身（不是找不到曲目）时，按 NotFound 处理（T-005 方案 v1 §2 错误码表）

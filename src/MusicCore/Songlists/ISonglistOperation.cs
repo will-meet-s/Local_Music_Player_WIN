@@ -83,13 +83,19 @@ internal sealed class DeleteOperation : ISonglistOperation
 internal sealed class MoveTrackOperation : ISonglistOperation
 {
     private readonly Guid _id;
-    private readonly Track _track;
+    private readonly string _targetKey;
     private readonly int _toIndex;
 
+    /// <summary>
+    /// 目标曲目的规范化 key 在构造时算一次（T-005 方案 v2 §8）：5000 条的歌单里，
+    /// 循环内每条 entry 只规范化自己的 <see cref="SonglistEntry.Path"/> 一次，
+    /// 不要每一条都用 <see cref="TrackIdentity.AreSame"/> 把目标曲目重新规范化一遍
+    /// （v1 的写法等于把目标曲目规范化了 5000 次，CI 上量出来的 793 毫秒有一部分就是它）。
+    /// </summary>
     public MoveTrackOperation(Guid id, Track track, int toIndex)
     {
         _id = id;
-        _track = track;
+        _targetKey = TrackIdentity.Normalize(track.Path);
         _toIndex = toIndex;
     }
 
@@ -103,7 +109,7 @@ internal sealed class MoveTrackOperation : ISonglistOperation
         var from = -1;
         for (var i = 0; i < entries.Count; i++)
         {
-            if (!TrackIdentity.AreSame(entries[i].Path, _track.Path)) continue;
+            if (!string.Equals(TrackIdentity.Normalize(entries[i].Path), _targetKey, StringComparison.OrdinalIgnoreCase)) continue;
             from = i;
             break;
         }
