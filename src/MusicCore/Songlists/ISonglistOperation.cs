@@ -1,3 +1,6 @@
+using MusicCore.Library;
+using MusicCore.Models;
+
 namespace MusicCore.Songlists;
 
 /// <summary>
@@ -12,6 +15,9 @@ public interface ISonglistOperation
     /// <summary>
     /// 在「刚从磁盘同步过来的最新目录」上执行校验并应用，返回新的歌单；Delete 返回 null。
     /// 必须是纯函数：校验不通过就抛 <see cref="SonglistException"/>。
+    /// 判定为不需要任何改动时（例如 <see cref="MoveTrackOperation"/> 挪到当前位置），原样返回
+    /// <paramref name="fresh"/> 里读到的那个实例（不要用 <c>with</c> 复制一份）——调用方靠引用相等
+    /// 判断"这次不用写盘"（T-005 方案 v1 §4）。
     /// </summary>
     Songlist? Apply(IReadOnlyDictionary<Guid, Songlist> fresh);
 }
@@ -67,5 +73,54 @@ internal sealed class DeleteOperation : ISonglistOperation
     {
         if (!fresh.ContainsKey(_id)) throw new SonglistException(SonglistErrorCode.NotFound);
         return null;
+    }
+}
+
+/// <summary>
+/// 调整歌单内顺序（T-005 方案 v1 §2）。按 <see cref="TrackIdentity"/> 定位要挪的那首，不按下标——
+/// 另一个窗口可能已经改过这个歌单，重新读取之后原下标对应的可能已经是另一首歌（FR-028 ②）。
+/// </summary>
+internal sealed class MoveTrackOperation : ISonglistOperation
+{
+    private readonly Guid _id;
+    private readonly Track _track;
+    private readonly int _toIndex;
+
+    public MoveTrackOperation(Guid id, Track track, int toIndex)
+    {
+        _id = id;
+        _track = track;
+        _toIndex = toIndex;
+    }
+
+    public Guid? TargetId => _id;
+
+    public Songlist? Apply(IReadOnlyDictionary<Guid, Songlist> fresh)
+    {
+        if (!fresh.TryGetValue(_id, out var current)) throw new SonglistException(SonglistErrorCode.NotFound);
+
+        var entries = current.Entries;
+        var from = -1;
+        for (var i = 0; i < entries.Count; i++)
+        {
+            if (!TrackIdentity.AreSame(entries[i].Path, _track.Path)) continue;
+            from = i;
+            break;
+        }
+
+        // 目标曲目已经被另一个实例移除了：不算错误，直接返回不变的歌单，调用方据此判断不用写盘
+        // （T-005 方案 v1 §2 第 1 条、§7 单测 4）
+        if (from < 0) return current;
+
+        var toIndex = Math.Clamp(_toIndex, 0, entries.Count - 1);
+        // 挪回原来的位置：同样返回不变的歌单，不用写盘（§4、§7 单测 3）
+        if (from == toIndex) return current;
+
+        var reordered = entries.ToList();
+        var moving = reordered[from];
+        reordered.RemoveAt(from);
+        reordered.Insert(toIndex, moving);
+
+        return current with { Entries = reordered };
     }
 }

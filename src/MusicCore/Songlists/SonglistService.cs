@@ -1,3 +1,5 @@
+using MusicCore.Models;
+
 namespace MusicCore.Songlists;
 
 /// <summary>
@@ -110,6 +112,14 @@ public sealed class SonglistService
         return ok ? SonglistResult.Ok() : SonglistResult.Fail(error!.Value);
     }
 
+    /// <summary>把 <paramref name="track"/> 挪到 <paramref name="toIndex"/>（T-005 方案 v1 §2）。
+    /// 目标曲目已经不在歌单里、或者 <paramref name="toIndex"/> 就是它当前的位置时，不写盘，直接返回成功。</summary>
+    public async Task<SonglistResult> MoveAsync(Guid id, Track track, int toIndex)
+    {
+        var (ok, _, error) = await ExecuteAsync(new MoveTrackOperation(id, track, toIndex), SonglistChangeKind.EntriesChanged);
+        return ok ? SonglistResult.Ok() : SonglistResult.Fail(error!.Value);
+    }
+
     /// <summary>
     /// 所有改动类操作的统一入口（§4.2）：预校验 → 排队 → 后台线程上拿跨进程锁、SyncFromDisk、
     /// 在最新数据的一份本地快照上重新校验并应用、写盘/删除 → 回到调用方线程后才提交到共享的
@@ -189,6 +199,11 @@ public sealed class SonglistService
                 _store.Delete(op.TargetId!.Value);
                 fresh.Remove(op.TargetId.Value);
                 stamps.Remove(op.TargetId.Value);
+            }
+            else if (op.TargetId is { } targetId && fresh.TryGetValue(targetId, out var before) && ReferenceEquals(before, applied))
+            {
+                // Apply 原样返回了它读到的那个实例，代表判定为不需要改动
+                // （T-005 方案 v1 §4：目标曲目已被移除、或者挪到了当前位置）：不写盘、不占用一次 Revision
             }
             else
             {
