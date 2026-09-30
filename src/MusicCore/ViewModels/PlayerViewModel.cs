@@ -28,10 +28,6 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
     /// 现有的无参构造调用（<c>App.xaml.cs</c>）不用改，也不会破坏 CI 的整个解决方案编译。</summary>
     private readonly SonglistService? _songlistService;
 
-    /// <summary>T-007 失效曲目检查。自己创建、自己持有——不像 <see cref="_songlistService"/>
-    /// 那样需要跨界面共享同一个实例，所以不用走构造函数参数。</summary>
-    private readonly AvailabilityChecker _checker;
-
     private CancellationTokenSource? _metadataCts;
 
     /// <summary>连续播放失败次数。用来避免整目录都是坏文件时无限自动跳曲。</summary>
@@ -50,7 +46,6 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
     public PlayerViewModel(SonglistService? songlistService = null)
     {
         _songlistService = songlistService;
-        _checker = new AvailabilityChecker(SynchronizationContext.Current ?? new SynchronizationContext());
         _preferences = Preferences.Load();
 
         _playMode = _preferences.PlayMode;
@@ -85,8 +80,8 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
         CycleLayoutCommand = new RelayCommand(CycleNowPlayingLayout);
         ClearSearchCommand = new RelayCommand(() => SearchText = "");
         ToggleSortDirectionCommand = new RelayCommand(() => SortAscending = !SortAscending);
-        PlayAtCommand = new RelayCommand<int>(PlayAt);
-        PlayNowPlayingAtCommand = new RelayCommand<int>(PlayNowPlayingAt);
+        PlayAtCommand = new RelayCommand<int>(i => Observe(PlayAt(i)));
+        PlayNowPlayingAtCommand = new RelayCommand<int>(i => Observe(PlayNowPlayingAt(i)));
         PlayNextCommand = new RelayCommand<IReadOnlyList<Track>>(PlayNextInNowPlaying);
         AppendCommand = new RelayCommand<IReadOnlyList<Track>>(AppendToNowPlaying);
         RemoveFromNowPlayingCommand = new RelayCommand<IReadOnlyList<int>>(RemoveFromNowPlaying);
@@ -103,6 +98,13 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
     /// 界面层的歌单 ViewModel 由 <c>MainWindow</c> 创建时注入同一个实例。
     /// </summary>
     public TrackCatalog Catalog { get; } = new();
+
+    /// <summary>
+    /// 进程内唯一的失效曲目检查器（T-007 复审 M-2）：根目录熔断的缓存、每 100 毫秒合并一次投递
+    /// 这两项都是这个实例自己的状态，界面层的歌单页、播放列表页调用 <see cref="AvailabilityChecker.Enqueue"/>
+    /// 时必须用这同一个实例，各建一个的话这两项就会各算各的（T-007 方案 v1 §2.3 的原意）。
+    /// </summary>
+    public AvailabilityChecker Availability { get; } = new(SynchronizationContext.Current ?? new SynchronizationContext());
 
     /// <summary>过滤 + 排序后的列表。UI 展示与播放队列都以它为准。</summary>
     public ObservableCollection<Track> Tracks { get; } = new();
@@ -733,7 +735,7 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
     /// </summary>
     public async Task<bool> EnsurePlayable(Track track)
     {
-        if (await _checker.CheckNowAsync(track)) return true;
+        if (await Availability.CheckNowAsync(track)) return true;
 
         ErrorMessage = $"找不到该文件：{track.Path}";
         return false;
@@ -742,7 +744,7 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
     /// <summary>从 <paramref name="start"/> 开始按 T-007 的规则往后找第一首可用的（T-006 的
     /// <see cref="PlaySonglistAll"/> 用）。全部不可用时返回 null。</summary>
     public Task<int?> FirstPlayableFrom(IReadOnlyList<Track> displayed, int start) =>
-        FirstPlayableFrom(_checker, displayed, start);
+        FirstPlayableFrom(Availability, displayed, start);
 
     /// <summary>核心逻辑拆成 <c>internal static</c>、显式传入 <see cref="AvailabilityChecker"/>——
     /// 不依赖 <see cref="PlayerViewModel"/> 就能单测（同 <see cref="ResolveAdvancedTrack"/> 的写法），
@@ -953,6 +955,25 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
     public void CycleNowPlayingLayout() => NowPlayingLayout = NowPlayingLayout.Next();
 
     // MARK: - 内部流转
+
+    /// <summary>
+    /// 观察一个「命令触发、不等待」的 <see cref="Task"/>（T-007 复审 M-1）：<see cref="RelayCommand{T}"/>
+    /// 要的是 <see cref="Action{T}"/>，接不了 <c>async Task</c> 方法，只能在这里 <c>await</c>；
+    /// 异常写进 <see cref="ErrorMessage"/>，同时通过 <see cref="SonglistService.Diagnostic"/> 记一笔，
+    /// 不能让异常被默默吞掉。
+    /// </summary>
+    private async void Observe(Task task)
+    {
+        try
+        {
+            await task;
+        }
+        catch (Exception e)
+        {
+            ErrorMessage = e.Message;
+            SonglistService.Diagnostic?.Invoke("PlayerViewModel", $"[PlayerViewModel] {e.GetType().Name} {e.Message}");
+        }
+    }
 
     /// <summary>
     /// 手动切歌，以及自动播放出错、或者无缝管线里没有下一首（<c>QueueExhausted</c>）时的兜底推进。
@@ -1244,6 +1265,6 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
         _metadataCts?.Cancel();
         _metadataCts?.Dispose();
         _engine.Dispose();
-        _checker.Dispose();
+        Availability.Dispose();
     }
 }
