@@ -71,6 +71,7 @@
                       CanReorderItems="False"
                       ReorderMode="Disabled"
                       DragItemsStarting="OnDragItemsStarting"
+                      DragItemsCompleted="OnDragItemsCompleted"
                       DragOver="OnDragOver"
                       Drop="OnDrop" />
 

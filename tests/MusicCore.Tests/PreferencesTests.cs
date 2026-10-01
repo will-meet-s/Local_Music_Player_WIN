@@ -185,4 +185,31 @@ public class PreferencesTests
 
         Assert.Equal(0.05, prefs.BackgroundOpacity, 4);
     }
+
+    /// <summary>SEC-05（安全审计 2026-10-01）：验证原子写入——保存成功之后，目录里不应该残留
+    /// <c>settings.json.tmp-*</c>，而且读回来的内容要和存进去的一致。写到临时目录，不碰真实的
+    /// <see cref="Preferences.FilePath"/>（同 NowPlayingStore 测试换临时路径的做法）。</summary>
+    [Fact]
+    public void SaveToFile_Succeeds_LeavesNoTempFileAndRoundTrips()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "WinMusicPlayerTests", Guid.NewGuid().ToString("N"));
+        var filePath = Path.Combine(directory, "settings.json");
+        try
+        {
+            var original = new Preferences { LastFolder = @"D:\测试 曲库\S", Volume = 0.42 };
+
+            Preferences.SaveToFile(filePath, original.Serialize());
+
+            Assert.True(File.Exists(filePath));
+            Assert.Empty(Directory.EnumerateFiles(directory, "settings.json.tmp-*"));
+
+            var restored = Preferences.Parse(File.ReadAllText(filePath));
+            Assert.Equal(original.LastFolder, restored.LastFolder);
+            Assert.Equal(original.Volume, restored.Volume, 6);
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
 }

@@ -9,6 +9,7 @@ using MusicCore.Models;
 using MusicCore.Songlists;
 using MusicCore.Support;
 using MusicCore.ViewModels;
+using Windows.ApplicationModel.DataTransfer;
 using Windows.System;
 using Windows.UI;
 
@@ -157,11 +158,22 @@ public sealed partial class NowPlayingListView : UserControl
         _draggedTrack = e.Items.OfType<Track>().FirstOrDefault();
     }
 
+    /// <summary>SEC-04：只有内部拖动（<see cref="_draggedTrack"/> 已经在
+    /// <see cref="OnDragItemsStarting"/> 里设好）才接受为 <c>Move</c>；从资源管理器拖文件进来时
+    /// <see cref="_draggedTrack"/> 是 null，报告 <c>None</c>，不然资源管理器可能在拖放完成后把
+    /// 源文件当成「移动」删掉。</summary>
     private void OnDragOver(object sender, DragEventArgs e) =>
-        e.AcceptedOperation = Windows.ApplicationModel.DataTransfer.DataPackageOperation.Move;
+        e.AcceptedOperation = _draggedTrack is not null ? DataPackageOperation.Move : DataPackageOperation.None;
+
+    /// <summary>防止拖到窗口外或取消时 <see cref="_draggedTrack"/> 残留，下一次外部拖入误判为内部拖动。</summary>
+    private void OnDragItemsCompleted(ListViewBase sender, DragItemsCompletedEventArgs args) => _draggedTrack = null;
 
     private void OnDrop(object sender, DragEventArgs e)
     {
+        // SEC-04：对外一律报告「无操作」——内部拖动只改内存和播放列表状态，不是文件系统操作，
+        // 拖放源（比如资源管理器）看到 Move 以外的结果就不会去删除原文件
+        e.AcceptedOperation = DataPackageOperation.None;
+
         var dragged = _draggedTrack;
         _draggedTrack = null;
         if (dragged is null) return;
