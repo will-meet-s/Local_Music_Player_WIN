@@ -99,7 +99,18 @@ public sealed partial class DesktopLyricsWindow : Window
 
     private void OnRootLoaded(object sender, RoutedEventArgs e)
     {
-        RestoreGeometry();
+        try
+        {
+            RestoreGeometry();
+        }
+        catch (Exception ex)
+        {
+            // DisplayArea.FindAll() 偶发在恢复位置时抛异常（DEF-002 v3）：
+            // 不能让这里的失败挡住后面的外观/锁定/歌词更新，退回主屏兜底继续走
+            CrashLog.Write("DesktopLyrics", ex);
+            PlaceOnPrimaryDisplay(Math.Max(320, _settings.DesktopLyricsWidth));
+        }
+
         ApplyAppearance();
         ApplyLock();
         UpdateText();
@@ -157,8 +168,12 @@ public sealed partial class DesktopLyricsWindow : Window
         var leftDip = _settings.DesktopLyricsLeft;
         var topDip = _settings.DesktopLyricsTop;
 
-        foreach (var display in DisplayArea.FindAll())
+        // 不能用 foreach：DisplayArea.FindAll() 返回的 IReadOnlyList<DisplayArea> 是 WinRT
+        // 投影类型，GetEnumerator() 做 IIterable 接口查询时会抛 InvalidCastException（DEF-002）
+        var displays = DisplayArea.FindAll();
+        for (var i = 0; i < displays.Count; i++)
         {
+            var display = displays[i];
             var scale = GetDisplayScale(display);
             var x = ToPx(leftDip, scale);
             var y = ToPx(topDip, scale);
