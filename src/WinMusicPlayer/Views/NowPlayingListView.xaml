@@ -36,7 +36,8 @@
                 <StackPanel Orientation="Horizontal">
                     <TextBlock FontFamily="{StaticResource IconFont}" Text="&#xE74E;"
                                FontSize="12" VerticalAlignment="Center" />
-                    <TextBlock Text="存为歌单" Margin="4,0,0,0" FontSize="12" VerticalAlignment="Center" />
+                    <TextBlock Text="存为歌单" Margin="4,0,0,0"
+                               FontFamily="{StaticResource UiFont}" FontSize="12" VerticalAlignment="Center" />
                 </StackPanel>
             </Button>
 
@@ -48,7 +49,8 @@
                 <StackPanel Orientation="Horizontal">
                     <TextBlock FontFamily="{StaticResource IconFont}" Text="&#xE74D;"
                                FontSize="12" VerticalAlignment="Center" />
-                    <TextBlock Text="清空" Margin="4,0,0,0" FontSize="12" VerticalAlignment="Center" />
+                    <TextBlock Text="清空" Margin="4,0,0,0"
+                               FontFamily="{StaticResource UiFont}" FontSize="12" VerticalAlignment="Center" />
                 </StackPanel>
             </Button>
         </Grid>
