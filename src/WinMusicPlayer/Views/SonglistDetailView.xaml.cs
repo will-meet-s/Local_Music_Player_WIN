@@ -5,6 +5,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using MusicCore.Models;
+using MusicCore.Support;
 using MusicCore.ViewModels;
 using Windows.System;
 
@@ -28,6 +29,9 @@ public sealed partial class SonglistDetailView : UserControl
             ((INotifyCollectionChanged)opened.Displayed).CollectionChanged += OnDisplayedChanged;
 
         UpdateEmptyState();
+
+        // songlist.open 的结束点（T-014 v1 §2.3）：起点在 SonglistListView.OnSonglistItemClick
+        PerfTraceUi.EndOnNextRenderingWithFirstRow(TrackList, "songlist.open");
     }
 
     public SonglistsViewModel SonglistsVm => App.SonglistsVm;
@@ -100,7 +104,14 @@ public sealed partial class SonglistDetailView : UserControl
     {
         if (SonglistsVm.Opened is not { } opened) return;
         var tracks = SelectionOrder.TracksByListOrder(TrackList, opened.Displayed);
-        if (tracks.Count > 0) Observe(SonglistsVm.RemoveFromOpenedAsync(tracks));
+        if (tracks.Count > 0) Observe(RemoveWithTraceAsync(tracks));
+    }
+
+    private async Task RemoveWithTraceAsync(IReadOnlyList<Track> tracks)
+    {
+        PerfTrace.Measure("songlist.remove");
+        await SonglistsVm.RemoveFromOpenedAsync(tracks);
+        PerfTraceUi.EndOnNextRendering("songlist.remove");
     }
 
     // MARK: - 键盘：Delete 移除，Alt+↑/↓ 调整顺序（T-004 §2.4、T-005 §2）
@@ -176,7 +187,9 @@ public sealed partial class SonglistDetailView : UserControl
     {
         try
         {
+            PerfTrace.Measure("songlist.move");
             await SonglistsVm.MoveInOpenedAsync(track, toIndex);
+            PerfTraceUi.EndOnNextRendering("songlist.move");
             TrackList.SelectedItem = track;
             TrackList.ScrollIntoView(track);
         }

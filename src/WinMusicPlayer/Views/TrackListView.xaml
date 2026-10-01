@@ -54,6 +54,7 @@
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
 
@@ -70,11 +71,30 @@
                         Command="{x:Bind ViewModel.ToggleSortDirectionCommand}"
                         ToolTipService.ToolTip="{x:Bind views:ViewFormat.SortTip(ViewModel.SortAscending), Mode=OneWay}" />
 
-                <TextBlock x:Name="MatchCount" Grid.Column="2"
+                <!-- T-016：定位当前播放，PlayingTrack 为 null 时不可用 -->
+                <Button Grid.Column="2" Style="{StaticResource IconButton}"
+                        FontSize="13" Margin="4,0,0,0"
+                        Content="&#xE81D;"
+                        Click="OnLocateCurrentClick"
+                        IsEnabled="{x:Bind ViewModel.CanLocateCurrent, Mode=OneWay}"
+                        ToolTipService.ToolTip="定位当前播放" />
+
+                <TextBlock x:Name="MatchCount" Grid.Column="3"
                            HorizontalAlignment="Right" VerticalAlignment="Center"
                            FontSize="11" Foreground="{StaticResource SecondaryTextBrush}"
                            Visibility="{x:Bind ViewModel.IsFiltering, Mode=OneWay}" />
             </Grid>
+
+            <!-- T-016 FR-029 ⑥：当前播放的歌曲被搜索过滤掉了，不自动关闭，用户点 ×、
+                 PlayingTrack 变化、或者用户自己改了搜索词时才关闭（代码后置控制） -->
+            <InfoBar x:Name="LocateFilteredOutBar" Margin="0,8,0,0"
+                     Severity="Informational"
+                     Message="当前播放的歌曲不在搜索结果中"
+                     IsOpen="False">
+                <InfoBar.ActionButton>
+                    <Button Content="清空搜索并定位" Click="OnClearSearchAndLocateClick" />
+                </InfoBar.ActionButton>
+            </InfoBar>
         </StackPanel>
 
         <Border Grid.Row="1" Height="1" Background="{StaticResource SeparatorBrush}" />

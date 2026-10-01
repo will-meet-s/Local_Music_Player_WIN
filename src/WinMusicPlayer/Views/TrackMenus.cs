@@ -2,6 +2,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using MusicCore.Models;
 using MusicCore.Songlists;
+using MusicCore.Support;
 using MusicCore.ViewModels;
 
 namespace WinMusicPlayer.Views;
@@ -24,7 +25,8 @@ internal static class TrackMenus
         var menu = new MenuFlyout();
 
         menu.Items.Add(CreateItem("下一首播放", () => player.PlayNextCommand.Execute(getSelectedTracks())));
-        menu.Items.Add(CreateItem("添加到播放列表末尾", () => player.AppendCommand.Execute(getSelectedTracks())));
+        menu.Items.Add(CreateItem("添加到播放列表末尾",
+            () => ExecuteWithTrace("nowplaying.add", () => player.AppendCommand.Execute(getSelectedTracks()))));
         menu.Items.Add(new MenuFlyoutSeparator());
         var subItem = new MenuFlyoutSubItem { Text = "添加到歌单" };
         menu.Items.Add(subItem);
@@ -44,8 +46,10 @@ internal static class TrackMenus
         var menu = new MenuFlyout();
 
         menu.Items.Add(CreateItem("下一首播放", () => player.PlayNextCommand.Execute(getSelectedTracks())));
-        menu.Items.Add(CreateItem("移到末尾", () => player.AppendCommand.Execute(getSelectedTracks())));
-        menu.Items.Add(CreateItem("从播放列表移除", () => player.RemoveFromNowPlayingCommand.Execute(getSelectedIndices())));
+        menu.Items.Add(CreateItem("移到末尾",
+            () => ExecuteWithTrace("nowplaying.add", () => player.AppendCommand.Execute(getSelectedTracks()))));
+        menu.Items.Add(CreateItem("从播放列表移除",
+            () => ExecuteWithTrace("nowplaying.remove", () => player.RemoveFromNowPlayingCommand.Execute(getSelectedIndices()))));
         menu.Items.Add(new MenuFlyoutSeparator());
         var subItem = new MenuFlyoutSubItem { Text = "添加到歌单" };
         menu.Items.Add(subItem);
@@ -106,12 +110,28 @@ internal static class TrackMenus
         foreach (var target in getTargets())
         {
             var id = target.Id;
-            items.Add(CreateItem(target.Name, () => Observe(songlistsVm.AddTracksAsync(id, getSelectedTracks()))));
+            items.Add(CreateItem(target.Name, () => Observe(AddTracksWithTraceAsync(songlistsVm, id, getSelectedTracks()))));
         }
 
         if (items.Count > 0) items.Add(new MenuFlyoutSeparator());
 
         items.Add(CreateItem("新建歌单…", () => Observe(ShowCreateWithTracksDialogAsync(xamlRoot, songlistsVm, getSelectedTracks()))));
+    }
+
+    private static async Task AddTracksWithTraceAsync(SonglistsViewModel songlistsVm, Guid id, IReadOnlyList<Track> tracks)
+    {
+        PerfTrace.Measure("songlist.add");
+        await songlistsVm.AddTracksAsync(id, tracks);
+        PerfTraceUi.EndOnNextRendering("songlist.add");
+    }
+
+    /// <summary>同步命令用：命令执行完就是「方法返回」，收尾不用等异步完成
+    /// （T-014 v1 §2.3 nowplaying.add/remove）。</summary>
+    private static void ExecuteWithTrace(string name, Action execute)
+    {
+        PerfTrace.Measure(name);
+        execute();
+        PerfTraceUi.EndOnNextRendering(name);
     }
 
     private static async Task ShowCreateWithTracksDialogAsync(XamlRoot xamlRoot, SonglistsViewModel songlistsVm, IReadOnlyList<Track> tracks)

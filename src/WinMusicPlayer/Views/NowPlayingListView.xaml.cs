@@ -7,6 +7,7 @@ using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using MusicCore.Models;
 using MusicCore.Songlists;
+using MusicCore.Support;
 using MusicCore.ViewModels;
 using Windows.System;
 using Windows.UI;
@@ -30,6 +31,10 @@ public sealed partial class NowPlayingListView : UserControl
     }
 
     public PlayerViewModel ViewModel => App.ViewModel;
+
+    /// <summary>nowplaying.open 的结束点（T-014 v1 §2.3）：起点在 LibraryPane.ShowNowPlaying。
+    /// 这个视图是缓存复用的，不是每次都构造，所以收尾要单独挂一个方法，每次切到这一页都调用。</summary>
+    public void NotifyShown() => PerfTraceUi.EndOnNextRenderingWithFirstRow(TrackList, "nowplaying.open");
 
     private void OnItemsChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
@@ -105,7 +110,12 @@ public sealed partial class NowPlayingListView : UserControl
         if (e.Key != VirtualKey.Delete) return;
 
         var indices = SelectionOrder.IndicesByListOrder(TrackList);
-        if (indices.Count > 0) ViewModel.RemoveFromNowPlayingCommand.Execute(indices);
+        if (indices.Count > 0)
+        {
+            PerfTrace.Measure("nowplaying.remove");
+            ViewModel.RemoveFromNowPlayingCommand.Execute(indices);
+            PerfTraceUi.EndOnNextRendering("nowplaying.remove");
+        }
         e.Handled = true;
     }
 
@@ -130,7 +140,9 @@ public sealed partial class NowPlayingListView : UserControl
         else if (e.Key == VirtualKey.Down && from < ViewModel.NowPlaying.Items.Count - 1) to = from + 1;
         else return;
 
+        PerfTrace.Measure("nowplaying.move");
         ViewModel.MoveInNowPlaying(from, to);
+        PerfTraceUi.EndOnNextRendering("nowplaying.move");
         // 挪动之后重新选中被挪动的那一首（UI-3 复审 M-3），不然连续按两次 Alt+↑/↓ 时
         // 第二次会因为 SelectedItems.Count != 1（选中丢失）而不响应
         TrackList.SelectedIndex = to;
@@ -161,7 +173,9 @@ public sealed partial class NowPlayingListView : UserControl
             TrackList, e.GetPosition(TrackList), from, ViewModel.NowPlaying.Items.Count);
         if (toIndex == from) return;
 
+        PerfTrace.Measure("nowplaying.move");
         ViewModel.MoveInNowPlaying(from, toIndex);
+        PerfTraceUi.EndOnNextRendering("nowplaying.move");
         TrackList.SelectedIndex = toIndex; // 挪动之后重新选中被拖动的那一首（UI-3 复审 M-3）
     }
 

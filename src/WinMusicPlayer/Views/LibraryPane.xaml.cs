@@ -1,5 +1,6 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using MusicCore.Support;
 
 namespace WinMusicPlayer.Views;
 
@@ -38,9 +39,11 @@ public sealed partial class LibraryPane : UserControl
 
     private void ShowNowPlaying()
     {
+        PerfTrace.Measure("nowplaying.open"); // 结束点在 NowPlayingListView.NotifyShown（T-014 v1 §2.3）
         var view = _nowPlayingView ??= new NowPlayingListView();
         PaneContent.Content = view;
         // 每次打开这一页都要滚动到当前行，不只是第一次创建的时候（T-001+T-008 v5 §4.5）
         view.ScrollToCurrent();
+        view.NotifyShown();
     }
 }

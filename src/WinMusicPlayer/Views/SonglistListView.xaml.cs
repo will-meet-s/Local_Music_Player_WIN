@@ -3,6 +3,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using MusicCore.Songlists;
+using MusicCore.Support;
 using MusicCore.ViewModels;
 
 namespace WinMusicPlayer.Views;
@@ -35,7 +36,10 @@ public sealed partial class SonglistListView : UserControl
 
     private void OnSonglistItemClick(object sender, ItemClickEventArgs e)
     {
-        if (e.ClickedItem is SonglistSummary summary) SonglistsVm.Open(summary.Id);
+        if (e.ClickedItem is not SonglistSummary summary) return;
+
+        PerfTrace.Measure("songlist.open"); // 结束点在 SonglistDetailView 构造函数里（T-014 v1 §2.3）
+        SonglistsVm.Open(summary.Id);
     }
 
     private void OnSonglistItemRightTapped(object sender, RightTappedRoutedEventArgs e)
@@ -59,11 +63,19 @@ public sealed partial class SonglistListView : UserControl
     {
         var dialog = new SonglistNameDialog("重命名", summary.Name,
             name => SonglistsVm.ValidateName(name, summary.Id),
-            name => SonglistsVm.RenameAsync(summary.Id, name))
+            name => RenameWithTraceAsync(summary.Id, name))
         {
             XamlRoot = XamlRoot
         };
         await dialog.ShowAsync();
+    }
+
+    private async Task<string?> RenameWithTraceAsync(Guid id, string name)
+    {
+        PerfTrace.Measure("songlist.rename");
+        var error = await SonglistsVm.RenameAsync(id, name);
+        PerfTraceUi.EndOnNextRendering("songlist.rename");
+        return error;
     }
 
     /// <summary>删除确认（T-003 v7 §2.5）：默认按钮是「取消」。</summary>
