@@ -3,6 +3,7 @@ using MusicCore.Library;
 using MusicCore.Lyrics;
 using MusicCore.Models;
 using MusicCore.Playback;
+using MusicCore.Songlists;
 using MusicCore.Support;
 
 namespace MusicCore.ViewModels;
@@ -11,16 +12,43 @@ namespace MusicCore.ViewModels;
 /// UI 的唯一数据源：串联扫描、元数据、歌词、播放队列与播放引擎。
 /// <para>
 /// 曲库有两份：<see cref="Library"/> 是扫描出来的全量（文件顺序，不动），
-/// <see cref="Tracks"/> 是经过搜索过滤与排序后<b>实际展示和播放</b>的列表。
-/// 播放队列按 <c>Tracks</c> 的下标工作，所以排序或搜索一变，队列必须跟着重建 ——
-/// 这件事统一在 <see cref="RebuildDisplayed"/> 里做。
+/// <see cref="Tracks"/> 是经过搜索过滤与排序后<b>曲库列表实际展示</b>的列表。
+/// 播放用的列表是 <see cref="NowPlaying"/>（T-001）：跟随状态下它是 <c>Tracks</c> 的镜像，
+/// 由 <see cref="RebuildDisplayed"/> 通过 <see cref="NowPlayingList.SyncFromLibrary"/> 保持同步；
+/// 独立状态（编辑或来自歌单）下则不受搜索 / 排序影响。播放队列按 <c>NowPlaying.Items</c> 的下标工作，
+/// <see cref="CurrentIndex"/>（曲库列表高亮）与 <see cref="NowPlayingIndex"/>（播放列表高亮）分别独立维护。
 /// </para>
 /// </summary>
 public sealed class PlayerViewModel : ObservableObject, IDisposable
 {
     private readonly PlayerEngine _engine = new();
-    private readonly PlaybackQueue _queue;
     private readonly Preferences _preferences;
+
+    /// <summary>T-011「存为歌单」需要。可选参数，默认 null：界面接入之前（等 MPC-388 验收），
+    /// 现有的无参构造调用（<c>App.xaml.cs</c>）不用改，也不会破坏 CI 的整个解决方案编译。</summary>
+    private readonly SonglistService? _songlistService;
+
+    // MARK: - T-010：重启恢复播放列表
+
+    private static readonly TimeSpan SaveDebounceDelay = TimeSpan.FromMilliseconds(500);
+    private static readonly TimeSpan FlushTimeout = TimeSpan.FromSeconds(2);
+
+    private readonly NowPlayingStore _nowPlayingStore = new(NowPlayingStore.DefaultPath);
+    private CancellationTokenSource? _saveDebounceCts;
+    private bool _saveFailureNotified;
+
+    /// <summary>
+    /// SEC-02（安全审计 2026-09-30）：去抖保存和退出保存都在后台线程上执行真正的写盘，
+    /// 谁先拿到 <see cref="NowPlayingStore"/> 内部的锁、谁先写完，不代表谁的快照更新。
+    /// 每次在 UI 线程上取快照时递增一次，随快照一起传给 <see cref="NowPlayingStore.SaveAsync"/>/
+    /// <see cref="NowPlayingStore.SaveNow"/>；写盘按这个序号判断新旧，不按完成顺序。
+    /// </summary>
+    private long _snapshotSeq;
+
+    /// <summary>跟随状态恢复时，扫描完成之前曲库还没准备好，先记下 currentPath，等
+    /// <see cref="RebuildDisplayed"/> 第一次跑完再去 <see cref="NowPlaying"/>.Items 里定位
+    /// （T-010 方案 v2 §4.2）。用掉之后清空，不会重复应用。</summary>
+    private string? _pendingFollowCurrent;
 
     private CancellationTokenSource? _metadataCts;
 
@@ -29,8 +57,17 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
 
     private List<Track> _library = new();
 
-    public PlayerViewModel()
+    // MARK: - T-008 E-2：编辑和自动切歌的竞态
+
+    /// <summary>每次编辑（T-008）都加 1，用来判断预加载的内容是不是被编辑作废了。</summary>
+    private int _listVersion;
+
+    private string? _preloadedPath;
+    private int _preloadVersion;
+
+    public PlayerViewModel(SonglistService? songlistService = null)
     {
+        _songlistService = songlistService;
         _preferences = Preferences.Load();
 
         _playMode = _preferences.PlayMode;
@@ -43,7 +80,14 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
         _exclusiveOutputEnabled = _preferences.ExclusiveOutputEnabled;
         _desktopLyricsEnabled = _preferences.DesktopLyricsEnabled;
 
-        _queue = new PlaybackQueue(0, _playMode);
+        NowPlaying = new NowPlayingList(_playMode);
+        NowPlaying.Changed += () =>
+        {
+            Raise(nameof(NowPlayingHeader));
+            Raise(nameof(NowPlayingSourceText));
+            Raise(nameof(CanSaveNowPlayingAsSonglist));
+            ScheduleSave();
+        };
 
         _engine.Volume = _volume;
         _engine.ExclusiveMode = _exclusiveOutputEnabled;
@@ -59,13 +103,31 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
         CycleLayoutCommand = new RelayCommand(CycleNowPlayingLayout);
         ClearSearchCommand = new RelayCommand(() => SearchText = "");
         ToggleSortDirectionCommand = new RelayCommand(() => SortAscending = !SortAscending);
-        PlayAtCommand = new RelayCommand<int>(PlayAt);
+        PlayAtCommand = new RelayCommand<int>(i => Observe(PlayAt(i)));
+        PlayNowPlayingAtCommand = new RelayCommand<int>(i => Observe(PlayNowPlayingAt(i)));
+        PlayNextCommand = new RelayCommand<IReadOnlyList<Track>>(PlayNextInNowPlaying);
+        AppendCommand = new RelayCommand<IReadOnlyList<Track>>(AppendToNowPlaying);
+        RemoveFromNowPlayingCommand = new RelayCommand<IReadOnlyList<int>>(RemoveFromNowPlaying);
+        ClearNowPlayingCommand = new RelayCommand(ClearNowPlaying);
     }
 
     // MARK: - 曲库
 
     /// <summary>扫描得到的全量曲库，保持文件顺序。</summary>
     public IReadOnlyList<Track> Library => _library;
+
+    /// <summary>
+    /// 进程内唯一的 Track 对象登记表，保证同一首歌在曲库、歌单、播放列表里显示一致（T-003）。
+    /// 界面层的歌单 ViewModel 由 <c>MainWindow</c> 创建时注入同一个实例。
+    /// </summary>
+    public TrackCatalog Catalog { get; } = new();
+
+    /// <summary>
+    /// 进程内唯一的失效曲目检查器（T-007 复审 M-2）：根目录熔断的缓存、每 100 毫秒合并一次投递
+    /// 这两项都是这个实例自己的状态，界面层的歌单页、播放列表页调用 <see cref="AvailabilityChecker.Enqueue"/>
+    /// 时必须用这同一个实例，各建一个的话这两项就会各算各的（T-007 方案 v1 §2.3 的原意）。
+    /// </summary>
+    public AvailabilityChecker Availability { get; } = new(SynchronizationContext.Current ?? new SynchronizationContext());
 
     /// <summary>过滤 + 排序后的列表。UI 展示与播放队列都以它为准。</summary>
     public ObservableCollection<Track> Tracks { get; } = new();
@@ -124,6 +186,30 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>
+    /// 定位当前播放的歌曲在曲库列表里的位置（T-016 方案 v1 §2.2，FR-029）。只读，不修改任何状态
+    /// （⑤）。结果为 <see cref="LocateOutcome.NotInFolder"/> 时设置 <see cref="Notice"/>（⑦）；
+    /// <see cref="LocateOutcome.FilteredOut"/> 的提示由界面层的 <c>InfoBar</c> 负责（界面接入阶段）。
+    /// </summary>
+    public LocateResult LocateCurrent()
+    {
+        var result = LibraryLocator.Locate(PlayingTrack, Tracks, _library);
+        if (result.Outcome == LocateOutcome.NotInFolder)
+            Notice = "当前播放的歌曲不在当前文件夹中";
+        return result;
+    }
+
+    /// <summary>
+    /// 「清空搜索并定位」（T-016 方案 v1 §2.2，FR-029 ⑥）：和用户手动清空搜索框完全一样，
+    /// 走 <see cref="RebuildDisplayed"/>，跟随状态下播放列表会跟着变（FR-024 ①）；
+    /// 然后返回 <see cref="LocateCurrent"/> 的结果。
+    /// </summary>
+    public LocateResult ClearSearchAndLocate()
+    {
+        SearchText = "";
+        return LocateCurrent();
+    }
+
     private TrackSortOrder _sortOrder;
     public TrackSortOrder SortOrder
     {
@@ -152,13 +238,53 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
 
     // MARK: - 播放状态
 
-    /// <summary>当前曲目在 <see cref="Tracks"/> 里的下标。被搜索过滤掉时为 -1。</summary>
+    /// <summary>当前曲目在 <see cref="Tracks"/> 里的下标。被搜索过滤掉时为 -1。曲库列表的高亮用它，含义不变。</summary>
     private int _currentIndex = -1;
     public int CurrentIndex
     {
         get => _currentIndex;
         private set => Set(ref _currentIndex, value);
     }
+
+    /// <summary>播放用的列表，和曲库显示的 <see cref="Tracks"/> 分开（T-001）。界面直接绑定它的 Items。</summary>
+    public NowPlayingList NowPlaying { get; }
+
+    /// <summary>当前曲目在 <see cref="NowPlaying"/>.Items 里的下标，没有时为 -1。播放列表页的高亮用它。</summary>
+    private int _nowPlayingIndex = -1;
+    public int NowPlayingIndex
+    {
+        get => _nowPlayingIndex;
+        private set
+        {
+            if (!Set(ref _nowPlayingIndex, value)) return;
+            Raise(nameof(NowPlayingHeader));
+            // 切歌（尤其是无缝自动切歌）不一定经过 NowPlaying.Changed（T-010 方案 v2 §2.3：
+            // HandleAutoAdvance 直接调 Queue.Next，不经过会触发 Changed 的 NowPlayingList 方法），
+            // 当前曲目本身就是要持久化的字段之一，所以在这里单独也触发一次去抖保存
+            ScheduleSave();
+        }
+    }
+
+    /// <summary>例如「来源：曲库 · 共 10 首 · 当前第 3 首」；没有当前曲目时省略最后一段；列表为空时是「播放列表为空」。</summary>
+    public string NowPlayingHeader
+    {
+        get
+        {
+            var count = NowPlaying.Items.Count;
+            if (count == 0) return "播放列表为空";
+
+            var header = $"来源：{NowPlayingSourceText} · 共 {count} 首";
+            return NowPlayingIndex >= 0 ? $"{header} · 当前第 {NowPlayingIndex + 1} 首" : header;
+        }
+    }
+
+    public string NowPlayingSourceText => NowPlaying.Source switch
+    {
+        NowPlayingSource.Library => "曲库",
+        NowPlayingSource.Songlist => $"歌单「{NowPlaying.SourceName}」",
+        NowPlayingSource.Edited => "已手动调整",
+        _ => ""
+    };
 
     /// <summary>正在播放的曲目本身。不受过滤影响，右侧「正在播放」区读这个。</summary>
     private Track? _playingTrack;
@@ -171,8 +297,16 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
             Raise(nameof(PlayingTitle));
             Raise(nameof(PlayingSubtitle));
             Raise(nameof(PlayingArtwork));
+            Raise(nameof(CanLocateCurrent));
         }
     }
+
+    /// <summary>
+    /// 「定位当前播放」按钮是否可用（T-016 方案 v1 §2.2，FR-029 ②）：「当前加载着」的口径和基线
+    /// 一致——<see cref="Stop"/> 之后 <see cref="PlayingTrack"/> 还在，按钮仍然可用；
+    /// <c>Unload</c>（切换文件夹、清空、全部播放失败）之后为 null，按钮不可用。
+    /// </summary>
+    public bool CanLocateCurrent => PlayingTrack is not null;
 
     public string PlayingTitle => _playingTrack?.Title ?? "未在播放";
     public string PlayingSubtitle => _playingTrack?.Subtitle ?? "";
@@ -272,7 +406,7 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
         set
         {
             if (!Set(ref _playMode, value)) return;
-            _queue.Mode = value;
+            NowPlaying.Queue.Mode = value;
             _preferences.PlayMode = value;
             _preferences.Save();
             Raise(nameof(PlayModeGlyph));
@@ -383,6 +517,17 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
 
     public bool HasError => !string.IsNullOrEmpty(_errorMessage);
 
+    /// <summary>
+    /// 提示性的文字（T-008），和 <see cref="ErrorMessage"/> 分开。界面用 InfoBar（Informational 级别）
+    /// 显示，3 秒后自动关闭——自动关闭的计时器是界面层的事，这里只负责持有当前要显示的文字。
+    /// </summary>
+    private string? _notice;
+    public string? Notice
+    {
+        get => _notice;
+        set => Set(ref _notice, value);
+    }
+
     /// <summary>桌面歌词窗口的外观设置直接读写这个对象。</summary>
     public Preferences Settings => _preferences;
 
@@ -399,6 +544,11 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
     public RelayCommand ClearSearchCommand { get; }
     public RelayCommand ToggleSortDirectionCommand { get; }
     public RelayCommand<int> PlayAtCommand { get; }
+    public RelayCommand<int> PlayNowPlayingAtCommand { get; }
+    public RelayCommand<IReadOnlyList<Track>> PlayNextCommand { get; }
+    public RelayCommand<IReadOnlyList<Track>> AppendCommand { get; }
+    public RelayCommand<IReadOnlyList<int>> RemoveFromNowPlayingCommand { get; }
+    public RelayCommand ClearNowPlayingCommand { get; }
 
     // MARK: - 曲库扫描
 
@@ -409,6 +559,75 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
         var last = _preferences.LastFolder;
         if (string.IsNullOrEmpty(last) || !Directory.Exists(last)) return;
         Scan(last);
+    }
+
+    /// <summary>
+    /// 恢复上次退出时的播放列表（T-010 方案 v2 §2.3、§4.2）。
+    /// <para>
+    /// <b>必须在 <see cref="RestoreLastSession"/> 返回之后、在同一段同步代码里紧接着调用</b>
+    /// （两次调用之间不能有 <c>await</c>）：<see cref="Scan"/> 的同步部分会重置播放状态，独立状态下
+    /// 还会调用 <see cref="NowPlayingList.ClearCurrentSelection"/>（T-009）——如果反过来，先恢复、
+    /// 后扫描，刚恢复出来的当前曲目会被立刻清掉（v1 的设计缺陷，v2 改成了这个顺序）。
+    /// 跟随状态下不受影响：<see cref="PerformScanAsync"/> 是异步的，它完成之后的延续要等 UI 线程
+    /// 空出来才会执行，一定比本方法（同步）晚，<see cref="_pendingFollowCurrent"/> 来得及在
+    /// 扫描完成前设好。本方法自身也必须是同步的：<see cref="NowPlayingStore.Load"/> 和解析 Track
+    /// 都是同步操作。
+    /// </para>
+    /// </summary>
+    public void RestoreNowPlaying()
+    {
+        var snapshot = _nowPlayingStore.Load();
+        if (snapshot is null) return;
+
+        if (snapshot.State == NowPlayingState.Independent)
+        {
+            // 独立状态恢复时，Track 对象要先于曲库扫描登记进 Catalog（T-003 v3：同一路径只对应
+            // 一个对象）；此刻 RestoreLastSession 已经跑完，但曲库扫描本身是异步的，还没有把
+            // 这些路径的 Track 建出来，所以这里 Resolve 到的一定是新建的对象，扫描完成时会被复用
+            var items = snapshot.Items
+                .Select(i => Catalog.Resolve(i.Path, i.Title, i.Artist, i.Album, i.Duration))
+                .ToList();
+            var currentIndex = NowPlayingList.FindIndexByPath(items, snapshot.CurrentPath);
+
+            NowPlaying.RestoreIndependent(items, currentIndex, snapshot.Source, snapshot.SourceName);
+            NowPlayingIndex = NowPlaying.CurrentIndex ?? -1;
+
+            // 恢复出来的曲目可能已经不在了（FR-009 ①），交给 T-007 检查标出不可用
+            Availability.Enqueue(NowPlaying.Items, CheckPriority.High);
+        }
+        else
+        {
+            // 跟随状态：items 本来就是空数组（方案 §3），列表内容交给即将开始的曲库扫描去填；
+            // 只留下 currentPath，等 RebuildDisplayed 第一次跑完（走 SyncFromLibrary 之后）去定位
+            _pendingFollowCurrent = snapshot.CurrentPath;
+        }
+    }
+
+    /// <summary>
+    /// <c>MainWindow.Closed</c> 调用：取消还在等待的去抖，无条件同步保存一次，不管这次运行期间
+    /// 播放列表有没有变化过（FR-028 ④：以最后退出的窗口为准）。最多等 2 秒（方案 §4.1）——
+    /// <see cref="NowPlayingStore.SaveNow"/> 本身是同步阻塞的文件 IO，没有自带超时，这里用后台
+    /// 线程 + <see cref="Task.Wait(TimeSpan)"/> 兜底，避免磁盘卡住时无限期拖住退出流程。
+    /// </summary>
+    public void FlushNowPlaying()
+    {
+        _saveDebounceCts?.Cancel();
+        _saveDebounceCts?.Dispose();
+        _saveDebounceCts = null;
+
+        var (snapshot, seq) = CaptureSnapshotForSave();
+        bool saved;
+        try
+        {
+            var task = Task.Run(() => _nowPlayingStore.SaveNow(snapshot, seq));
+            saved = task.Wait(FlushTimeout) && task.Result;
+        }
+        catch (Exception e) when (e is AggregateException or ObjectDisposedException)
+        {
+            saved = false;
+        }
+
+        if (!saved) NotifySaveFailureOnce();
     }
 
     /// <summary>切换到新文件夹：停止播放、清空搜索、从零重建曲库。</summary>
@@ -422,6 +641,7 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
         _preferences.Save();
 
         CurrentIndex = -1;
+        NowPlayingIndex = -1;
         PlayingTrack = null;
         PlayingTrackMissing = false;
         CurrentTime = 0;
@@ -432,6 +652,12 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
         _consecutiveFailures = 0;
         // 换了曲库，旧关键词多半一条都匹配不上，留着只会看到空列表
         SearchText = "";
+
+        // 独立状态下，RebuildDisplayed 不会调用 SyncFromLibrary（保持 Items 不动），所以队列的
+        // 选中状态要单独清掉——不然 Queue.Current 还停留在切换文件夹之前那首，和上面已经清空的
+        // PlayingTrack 对不上（T-009 方案 v1 §4.1）。跟随状态下不用管：RebuildDisplayed 会走
+        // SyncFromLibrary，playing 已经是 null，自然没有当前曲目
+        if (NowPlaying.State == NowPlayingState.Independent) NowPlaying.ClearCurrentSelection();
 
         _ = PerformScanAsync(folder, reportEmpty: true);
     }
@@ -461,15 +687,27 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
         {
             var paths = await Task.Run(() => LibraryScanner.Scan(folder));
 
-            // 复用已有条目，避免重扫时把整库的元数据全部重读一遍
-            var known = _library.ToDictionary(t => t.Path, StringComparer.OrdinalIgnoreCase);
+            // 复用已有条目，避免重扫时把整库的元数据全部重读一遍；
+            // 找不到再看 Catalog 里是否已经有（例如 T-003 打开歌单时先创建的对象），
+            // 都没有才新建，登记进 Catalog，保证同一首歌全进程只有一个对象（T-003 v3）
+            var known = _library.ToDictionary(t => t.Path, TrackIdentity.Comparer);
             _library = paths
-                .Select(p => known.TryGetValue(p, out var existing) ? existing : new Track(p))
+                .Select(p => known.TryGetValue(p, out var existing) ? existing
+                    : Catalog.TryGet(p, out var fromCatalog) ? fromCatalog
+                    : new Track(p))
                 .ToList();
+            Catalog.RegisterLibrary(_library);
 
             Raise(nameof(Library));
             Raise(nameof(LibraryCount));
             RebuildDisplayed();
+
+            // 扫描完成后触发一次可用性检查（T-009 方案 v1 §2、T-007 §2.3）：独立状态下被删掉的
+            // 文件不会自动从 Items 里移除（FR-021 ①），要靠这一步标成不可用。跟随状态下曲库本身
+            // 就是最新的，这次检查大概率全部通过，但保持一致不用再区分状态。
+            // 「对当前打开的歌单也调用一次 Enqueue」（T-007 §2.3）留给界面接入阶段：PlayerViewModel
+            // 不持有当前打开的 SonglistDetailViewModel，界面层拿到扫描完成的信号后自己调用。
+            Availability.Enqueue(NowPlaying.Items, CheckPriority.High);
 
             if (_library.Count == 0 && reportEmpty)
                 ErrorMessage = "该文件夹下没有找到受支持的音频文件";
@@ -557,34 +795,37 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
     /// </summary>
     private void RebuildDisplayed()
     {
-        // 先记住当前曲目在旧列表里的序号，它从新列表消失时要靠这个定位
-        var previousIndex = CurrentIndex;
+        // 先记住当前曲目在播放列表里的序号，跟随状态下同步曲库时用它停靠位置
+        var previousNowPlayingIndex = NowPlayingIndex;
 
         var filtered = TrackFilter.Apply(_library, SearchText, SortOrder, SortAscending);
 
         Tracks.Clear();
         foreach (var track in filtered) Tracks.Add(track);
 
-        _queue.SetCount(Tracks.Count);
+        // 跟随状态下，播放列表整体替换成新的曲库展示结果，队列跟着重新对齐；
+        // 独立状态下播放列表和队列都不动（T-001 设计方案 §4.1）
+        if (NowPlaying.State == NowPlayingState.FollowLibrary)
+            NowPlaying.SyncFromLibrary(Tracks, _playingTrack, previousNowPlayingIndex);
 
-        var playingPath = _playingTrack?.Path;
-        var index = playingPath is null
-            ? -1
-            : IndexOfPath(playingPath);
+        // 跟随状态恢复（T-010 方案 v2 §4.2）：RestoreNowPlaying 只记下了 currentPath，
+        // 曲库扫描完成、上面的 SyncFromLibrary 跑完之后，这里才第一次有机会在 Items 里定位它。
+        // playing 为 null 是这一步生效的前提——扫描期间用户已经自己点开别的歌时不应该被覆盖掉
+        if (_pendingFollowCurrent is { } pendingPath)
+        {
+            _pendingFollowCurrent = null;
+            if (NowPlaying.State == NowPlayingState.FollowLibrary && _playingTrack is null &&
+                NowPlayingList.FindIndexByPath(NowPlaying.Items, pendingPath) is { } foundIndex)
+            {
+                NowPlaying.SelectInList(foundIndex);
+            }
+        }
 
-        if (index >= 0)
-        {
-            _queue.Select(index);
-            CurrentIndex = index;
-        }
-        else
-        {
-            // 当前曲目不在新列表里：可能是文件被删了，也可能只是被搜索过滤掉。
-            // 停靠在它原来的序号上，播完从那个位置接着走，而不是跳回列表开头。
-            if (previousIndex >= 0) _queue.Park(previousIndex);
-            else _queue.ClearSelection();
-            CurrentIndex = -1;
-        }
+        NowPlayingIndex = NowPlaying.CurrentIndex ?? -1;
+
+        // CurrentIndex 的含义不变：正在播的曲目在 Tracks 里的下标，曲库列表高亮用它，
+        // 与播放列表状态无关，独立状态下也照样按路径在 Tracks 里找
+        CurrentIndex = _playingTrack is null ? -1 : IndexOfPath(_playingTrack.Path);
 
         UpdatePlayingTrackMissing();
 
@@ -592,10 +833,12 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
         _engine.InvalidatePreload();
     }
 
+    /// <summary>在 <see cref="Tracks"/> 里按路径定位，用于曲库列表的高亮（<see cref="CurrentIndex"/>）。</summary>
     private int IndexOfPath(string path)
     {
+        var key = TrackIdentity.Normalize(path);
         for (var i = 0; i < Tracks.Count; i++)
-            if (string.Equals(Tracks[i].Path, path, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(Tracks[i].IdentityKey, key, StringComparison.OrdinalIgnoreCase))
                 return i;
         return -1;
     }
@@ -613,25 +856,231 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
             return;
         }
 
-        PlayingTrackMissing = !_library.Any(
-            t => string.Equals(t.Path, track.Path, StringComparison.OrdinalIgnoreCase));
+        var key = TrackIdentity.Normalize(track.Path);
+        PlayingTrackMissing = !_library.Any(t => string.Equals(t.IdentityKey, key, StringComparison.OrdinalIgnoreCase));
     }
 
     // MARK: - 播放控制
 
-    public void PlayAt(int index)
+    /// <summary>点播前先检查是否可用（T-007 方案 v1 §2.4）：不可用就提示，其他什么都不做，
+    /// 当前播放和播放列表都不变。</summary>
+    public async Task PlayAt(int index)
     {
         if (index < 0 || index >= Tracks.Count) return;
-        _queue.Select(index);
+        if (!await EnsurePlayable(Tracks[index])) return;
+
+        NowPlaying.PlayFromLibrary(Tracks, index);
         StartCurrent();
+    }
+
+    /// <summary>在播放列表页里双击。点播前先检查是否可用（T-007 方案 v1 §2.4）。</summary>
+    public async Task PlayNowPlayingAt(int index)
+    {
+        if (index < 0 || index >= NowPlaying.Items.Count) return;
+        if (!await EnsurePlayable(NowPlaying.Items[index])) return;
+
+        NowPlaying.SelectInList(index);
+        StartCurrent();
+    }
+
+    /// <summary>
+    /// 点播前检查是否可用（T-007 方案 v1 §6，供 T-006 复用）。不可用时设置
+    /// <see cref="ErrorMessage"/> 并返回 false，调用方据此判断直接返回、不改动当前播放和播放列表。
+    /// </summary>
+    public async Task<bool> EnsurePlayable(Track track)
+    {
+        if (await Availability.CheckNowAsync(track)) return true;
+
+        ErrorMessage = $"找不到该文件：{track.Path}";
+        return false;
+    }
+
+    /// <summary>从 <paramref name="start"/> 开始按 T-007 的规则往后找第一首可用的（T-006 的
+    /// <see cref="PlaySonglistAll"/> 用）。全部不可用时返回 null。</summary>
+    public Task<int?> FirstPlayableFrom(IReadOnlyList<Track> displayed, int start) =>
+        FirstPlayableFrom(Availability, displayed, start);
+
+    /// <summary>核心逻辑拆成 <c>internal static</c>、显式传入 <see cref="AvailabilityChecker"/>——
+    /// 不依赖 <see cref="PlayerViewModel"/> 就能单测（同 <see cref="ResolveAdvancedTrack"/> 的写法），
+    /// 覆盖 T-006 方案 v1 §7 单测 5「全部不可用」。</summary>
+    internal static async Task<int?> FirstPlayableFrom(AvailabilityChecker checker, IReadOnlyList<Track> displayed, int start)
+    {
+        for (var i = start; i < displayed.Count; i++)
+        {
+            if (await checker.CheckNowAsync(displayed[i])) return i;
+        }
+        return null;
+    }
+
+    // MARK: - T-006：歌单里点播
+
+    /// <summary>
+    /// 在歌单详情页点播某一首（T-006 方案 v1 §2.2）。<paramref name="displayed"/> 是歌单详情页
+    /// 当前显示的列表（含 T-012 歌单内搜索的结果），<paramref name="name"/> 是歌单名。
+    /// 点播前先按 T-007 检查是否可用：不可用就提示，其他什么都不做（FR-021 ④）。
+    /// </summary>
+    public async Task PlaySonglistAt(IReadOnlyList<Track> displayed, int index, string name)
+    {
+        if (index < 0 || index >= displayed.Count) return;
+        if (!await EnsurePlayable(displayed[index])) return;
+
+        NowPlaying.PlayFromSonglist(displayed, index, name);
+        StartCurrent();
+    }
+
+    /// <summary>
+    /// 歌单详情页「播放全部」（T-006 方案 v1 §2.2）：从第 0 首开始；第 0 首不可用时，按 T-007 的
+    /// 规则往后找第一首可用的。全部不可用就提示「列表中的音频都无法播放，已停止」，并且不改变
+    /// 播放列表（T-006 方案 v1 §7 单测 5）。
+    /// </summary>
+    public async Task PlaySonglistAll(IReadOnlyList<Track> displayed, string name)
+    {
+        if (displayed.Count == 0) return;
+
+        var index = await FirstPlayableFrom(displayed, 0);
+        if (index is null)
+        {
+            ErrorMessage = "列表中的音频都无法播放，已停止";
+            return;
+        }
+
+        await PlaySonglistAt(displayed, index.Value, name);
+    }
+
+    // MARK: - T-011：播放列表存为歌单
+
+    public bool CanSaveNowPlayingAsSonglist => NowPlaying.Items.Count > 0;
+
+    /// <summary>
+    /// 取播放列表当前快照（T-011 方案 v1 §7 易踩的坑）：必须在打开新建歌单对话框**之前**调用，
+    /// 界面层按「先取快照、后开对话框」的顺序调用这两个方法来保证——对话框打开期间播放列表
+    /// 又变了（比如自动切歌），保存的仍然是点击按钮那一刻的内容，不会读到之后的变化。
+    /// </summary>
+    public IReadOnlyList<Track> CaptureNowPlayingSnapshot() => NowPlaying.Items.ToList();
+
+    /// <summary>
+    /// 用户在新建歌单对话框里确定名称之后调用，<paramref name="snapshot"/> 是
+    /// <see cref="CaptureNowPlayingSnapshot"/> 取到的那份（T-011 方案 v1 §2）。
+    /// 只调用 <see cref="SonglistService.CreateWithTracksAsync"/>，不调用 <see cref="NowPlayingList"/>
+    /// 的任何修改方法——存歌单不算编辑，播放列表的状态、来源、当前曲目、播放都不变（FR-010）。
+    /// <para>
+    /// 名称类错误（<see cref="SonglistErrorCode.NameEmpty"/> 等）按 T-003 §2.3 的约定，
+    /// 要显示在对话框输入框下方、对话框不关闭，属于界面层职责，这里不经过
+    /// <see cref="ErrorMessage"/>——调用方直接读返回值的 <c>Error</c> 就能拿到错误码。
+    /// <see cref="SonglistErrorCode.SaveFailed"/> 才通过 <see cref="ErrorMessage"/> 提示。
+    /// </para>
+    /// </summary>
+    public async Task<SonglistResult<AddResult>> SaveSnapshotAsSonglistAsync(string name, IReadOnlyList<Track> snapshot)
+    {
+        if (_songlistService is null)
+            throw new InvalidOperationException("SaveSnapshotAsSonglistAsync 需要构造 PlayerViewModel 时传入 SonglistService");
+
+        var result = await _songlistService.CreateWithTracksAsync(name, snapshot);
+        if (result.Success)
+            // SonglistName 是保存后的名称（已经去掉首尾空白），不是调用方传入的原始 name（M-2）
+            Notice = $"已将播放列表存为歌单「{result.Value!.SonglistName}」（{result.Value.Added} 首）";
+        else if (result.Error == SonglistErrorCode.SaveFailed)
+            ErrorMessage = SonglistNotices.ForSaveFailed(result.FailureReason!.Value);
+
+        return result;
+    }
+
+    // MARK: - T-008：播放列表编辑
+
+    /// <summary>下一首播放（FR-004）。<paramref name="tracks"/> 必须已经按列表里的上下顺序排好（界面层用 SelectionOrder.ByListOrder）。</summary>
+    public void PlayNextInNowPlaying(IReadOnlyList<Track> tracks)
+    {
+        var result = NowPlaying.PlayNext(tracks, PlayingTrack);
+        if (result.Relocated > 0) Notice = "已调整到下一首";
+        ApplyEditSideEffects(result);
+    }
+
+    /// <summary>加到播放列表末尾（FR-005）。</summary>
+    public void AppendToNowPlaying(IReadOnlyList<Track> tracks)
+    {
+        var result = NowPlaying.Append(tracks, PlayingTrack);
+        if (result.Relocated > 0) Notice = $"有 {result.Relocated} 首已在播放列表中，已调整到末尾";
+        ApplyEditSideEffects(result);
+    }
+
+    /// <summary>从播放列表移除（FR-006）。</summary>
+    public void RemoveFromNowPlaying(IReadOnlyList<int> indices) => ApplyEditSideEffects(NowPlaying.Remove(indices));
+
+    /// <summary>拖动排序时调用（FR-007）。</summary>
+    public void MoveInNowPlaying(int from, int to) => ApplyEditSideEffects(NowPlaying.Move(from, to));
+
+    /// <summary>清空播放列表（FR-008）。</summary>
+    public void ClearNowPlaying()
+    {
+        NowPlaying.Clear();
+        UnloadBecauseNoCurrent();
+        _listVersion++;
+        _engine.InvalidatePreload();
+    }
+
+    /// <summary>
+    /// 编辑操作共同的收尾：让预加载判断（E-2）能感知到列表变了。
+    /// <para>
+    /// <see cref="EditResult.StopPlayback"/>（v5 修 M-1）才是"该不该停止播放"的依据：只有
+    /// 「<c>IsFinished</c> 为真时的 <c>PlayNext</c>」会置为 true。<see cref="EditResult.NoCurrentAfter"/>
+    /// 不能当这个依据用——移除正在放的歌之后 <c>Current</c> 会变成 null，但引擎里那首歌要继续放完
+    /// （FR-006），这时只清掉播放列表页的高亮，不能卸载引擎。
+    /// </para>
+    /// </summary>
+    private void ApplyEditSideEffects(EditResult result)
+    {
+        _listVersion++;
+        _engine.InvalidatePreload();
+
+        if (result.StopPlayback)
+        {
+            UnloadBecauseNoCurrent();
+            return;
+        }
+
+        if (result.NoCurrentAfter)
+        {
+            NowPlayingIndex = -1;
+            return;
+        }
+
+        if (NowPlaying.Queue.Current is { } idx && idx >= 0 && idx < NowPlaying.Items.Count)
+        {
+            NowPlayingIndex = idx;
+            CurrentIndex = IndexOfPath(NowPlaying.Items[idx].Path);
+        }
+    }
+
+    /// <summary>编辑后队列没有当前曲目：停止播放，不自动从头开始（FR-004 ⑤、FR-005、FR-008）。</summary>
+    private void UnloadBecauseNoCurrent()
+    {
+        _engine.Unload();
+        PlayingTrack = null;
+        PlayingTrackMissing = false;
+        CurrentIndex = -1;
+        NowPlayingIndex = -1;
+        CurrentTime = 0;
+        Duration = 0;
+        Lyrics = Array.Empty<LyricLine>();
+        CurrentLyricIndex = -1;
+        IsPlaying = false;
     }
 
     public void TogglePlayPause()
     {
         if (_playingTrack is null)
         {
+            // 有恢复出来的当前曲目、但引擎还没加载它（T-010 方案 v2 §2.3）：从它开始放，
+            // 而不是走下面 Queue.Next 跳到下一首——基线不会出现这种「有当前曲目但引擎没加载」
+            // 的状态，只有 T-010 的恢复流程会，所以不影响基线行为
+            if (NowPlaying.Queue.Current is not null)
+            {
+                StartCurrent();
+                return;
+            }
+
             // 还没选歌时，播放键等同于从头开始
-            if (_queue.Next(auto: false) is not null) StartCurrent();
+            if (NowPlaying.Queue.Next(auto: false) is not null) StartCurrent();
             return;
         }
 
@@ -658,7 +1107,7 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
             return;
         }
 
-        if (_queue.Previous() is null) return;
+        if (RetreatSkippingUnavailable(NowPlaying.Queue, NowPlaying.Items) is null) return;
         StartCurrent();
     }
 
@@ -670,25 +1119,161 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
 
     // MARK: - 内部流转
 
-    /// <summary>手动切歌。自动推进由引擎的无缝管线负责，不走这里。</summary>
-    private void Advance(bool auto)
+    /// <summary>
+    /// 观察一个「命令触发、不等待」的 <see cref="Task"/>（T-007 复审 M-1）：<see cref="RelayCommand{T}"/>
+    /// 要的是 <see cref="Action{T}"/>，接不了 <c>async Task</c> 方法，只能在这里 <c>await</c>；
+    /// 异常写进 <see cref="ErrorMessage"/>，同时通过 <see cref="SonglistService.Diagnostic"/> 记一笔，
+    /// 不能让异常被默默吞掉。
+    /// </summary>
+    private async void Observe(Task task)
     {
-        if (_queue.Next(auto) is null)
+        try
         {
-            // 顺序播放到达列表末尾
-            Stop();
+            await task;
+        }
+        catch (Exception e)
+        {
+            ErrorMessage = e.Message;
+            // 诊断日志不能带路径（T-003 §5）：e.Message 里可能有完整路径（比如 IOException），
+            // 只记异常类型和 HResult；ErrorMessage 是给用户看的，仍然保留 e.Message
+            SonglistService.Diagnostic?.Invoke("PlayerViewModel", $"[PlayerViewModel] {e.GetType().Name} 0x{e.HResult:X8}");
+        }
+    }
+
+    /// <summary>
+    /// 播放列表内容、状态或当前曲目变化后调度一次去抖保存（T-010 方案 v2 §2.3、§4.1）：取消上一次
+    /// 还没触发的等待，只有最后一次 <see cref="ScheduleSave"/> 真正落地，500 毫秒内的连续变化
+    /// 只写一次盘。
+    /// </summary>
+    private void ScheduleSave()
+    {
+        _saveDebounceCts?.Cancel();
+        _saveDebounceCts?.Dispose();
+        var cts = new CancellationTokenSource();
+        _saveDebounceCts = cts;
+        Observe(SaveAfterDebounceAsync(cts.Token));
+    }
+
+    /// <summary>
+    /// 被取消（等待期间又发生了新的变化）时安静返回，不算错误，也不会被 <see cref="Observe"/>
+    /// 当成异常处理。保存失败（IOException 等）<see cref="NowPlayingStore.SaveAsync"/> 已经兜住了，
+    /// 不会抛出来，这里只看返回值走 FR-027 ③ 的提示逻辑。
+    /// </summary>
+    private async Task SaveAfterDebounceAsync(CancellationToken token)
+    {
+        try
+        {
+            await Task.Delay(SaveDebounceDelay, token);
+        }
+        catch (OperationCanceledException)
+        {
             return;
         }
-        StartCurrent();
+
+        var (snapshot, seq) = CaptureSnapshotForSave();
+        var saved = await _nowPlayingStore.SaveAsync(snapshot, seq);
+        if (!saved) NotifySaveFailureOnce();
+    }
+
+    /// <summary>在 UI 线程上把「取快照」和「分配序号」绑成一步（SEC-02）：谁最后调用这个方法，
+    /// 谁的序号最大，<see cref="NowPlayingStore"/> 只认序号，不认两次写盘谁先完成。</summary>
+    private (NowPlayingSnapshot Snapshot, long Seq) CaptureSnapshotForSave() =>
+        (NowPlaying.ToSnapshot(), ++_snapshotSeq);
+
+    /// <summary>FR-027 ③：保存失败本次运行只提示一次，编辑照样生效，不打断播放；
+    /// 下一次变化时照常重试保存（不受这个标记影响，标记只管要不要弹提示）。</summary>
+    private void NotifySaveFailureOnce()
+    {
+        if (_saveFailureNotified) return;
+        _saveFailureNotified = true;
+        Notice = "播放列表未能保存，重启后可能无法恢复";
+    }
+
+    /// <summary>
+    /// 手动切歌，以及自动播放出错、或者无缝管线里没有下一首（<c>QueueExhausted</c>）时的兜底推进。
+    /// 无缝切歌本身（<see cref="HandleAutoAdvance"/>）不走这里。跳过已知不可用的曲目
+    /// （T-007 方案 v1 §2.4、§4.1 第 3 步、§4.2）。
+    /// </summary>
+    private void Advance(bool auto)
+    {
+        var outcome = AdvanceSkippingUnavailable(NowPlaying.Queue, NowPlaying.Items, auto);
+        if (outcome.Index is not null)
+        {
+            StartCurrent();
+            return;
+        }
+
+        if (outcome.ExhaustedWithoutAvailable)
+        {
+            StopBecauseAllTracksUnavailable();
+            return;
+        }
+
+        // 顺序播放到达列表末尾（真正的 Queue.Next 返回了 null，不是"跳过不可用"耗尽了步数）
+        Stop();
+    }
+
+    /// <summary>
+    /// <see cref="Advance"/> 的返回结果（T-007 方案 v1 §4.1、§4.2）：<see cref="Index"/> 有值表示
+    /// 找到了一首可用的；<see cref="ExhaustedWithoutAvailable"/> 为 true 表示走满
+    /// <see cref="NowPlayingList.Items"/> 那么多步都没找到可用的（对应"全部不可用"），要和
+    /// "顺序播放自然到底"（<see cref="Index"/>、<see cref="ExhaustedWithoutAvailable"/> 都是默认值）
+    /// 区分开——后者只是安静地停止，不提示。
+    /// </summary>
+    internal readonly record struct AdvanceOutcome(int? Index, bool ExhaustedWithoutAvailable);
+
+    /// <summary>
+    /// 跳过已知不可用的曲目往前走（T-007 方案 v1 §4.1）：最多沿同一方向走
+    /// <paramref name="items"/>.Count 步。<paramref name="queue"/>.Next 本身返回 null（顺序播放到底、
+    /// 或者列表为空）时立即停下，视为自然到底，不是"全部不可用"。不改动 <paramref name="items"/>
+    /// 本身（①：不自动删除）。拆成 <c>internal static</c> 是为了不依赖 <see cref="PlayerViewModel"/>
+    /// 就能单测（同 <see cref="ResolveAdvancedTrack"/> 的写法）。
+    /// </summary>
+    internal static AdvanceOutcome AdvanceSkippingUnavailable(PlaybackQueue queue, IReadOnlyList<Track> items, bool auto)
+    {
+        for (var step = 0; step < items.Count; step++)
+        {
+            var next = queue.Next(auto);
+            if (next is null) return new AdvanceOutcome(null, false);
+            if (next.Value >= 0 && next.Value < items.Count && items[next.Value].IsAvailable)
+                return new AdvanceOutcome(next, false);
+        }
+        return new AdvanceOutcome(null, true);
+    }
+
+    /// <summary>往回切时跳过已知不可用的曲目（T-007 方案 v1 §4.1、§7 单测 2）：最多走
+    /// <paramref name="items"/>.Count 步；<paramref name="queue"/>.Previous 返回 null 就停下。</summary>
+    internal static int? RetreatSkippingUnavailable(PlaybackQueue queue, IReadOnlyList<Track> items)
+    {
+        for (var step = 0; step < items.Count; step++)
+        {
+            var prev = queue.Previous();
+            if (prev is null) return null;
+            if (prev.Value >= 0 && prev.Value < items.Count && items[prev.Value].IsAvailable) return prev;
+        }
+        return null;
+    }
+
+    /// <summary>连续失败达到一整轮，或者跳过不可用曲目也走满一整轮都没找到能播的
+    /// （T-007 方案 v1 §4.2）。只在真正触发的这一刻提示；引擎停下之后不会再自动触发下一次
+    /// Advance，所以不会重复提示（对应 TC-095：60 秒内只出现一次）。</summary>
+    private void StopBecauseAllTracksUnavailable()
+    {
+        ErrorMessage = "列表中的音频都无法播放，已停止";
+        _engine.Unload();
+        CurrentIndex = -1;
+        NowPlayingIndex = -1;
+        PlayingTrack = null;
     }
 
     private void StartCurrent()
     {
-        if (_queue.Current is not { } index || index < 0 || index >= Tracks.Count) return;
+        if (NowPlaying.Queue.Current is not { } index || index < 0 || index >= NowPlaying.Items.Count) return;
 
-        var track = Tracks[index];
+        var track = NowPlaying.Items[index];
 
-        CurrentIndex = index;
+        NowPlayingIndex = index;
+        CurrentIndex = IndexOfPath(track.Path);
         PlayingTrack = track;
         PlayingTrackMissing = false;
         CurrentTime = 0;
@@ -702,32 +1287,42 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
     /// <summary>引擎已无缝推进到下一首，这里只需把界面状态跟上。</summary>
     private void HandleAutoAdvance(PlayableItem item)
     {
-        // 推进播放队列。正常情况它给出的就是引擎已经切到的那首；
-        // 若期间列表被排序 / 过滤改动过，就按路径重新对齐。
-        var expected = _queue.Next(auto: true);
-        var actual = IndexOfPath(item.Path);
+        // E-2：编辑发生在音频线程切歌之后、这里执行之前——引擎预加载的这首已经被作废了。
+        // 必须在调用 Queue.Next 之前就判断"预加载时的版本是不是还是当前版本"，
+        // 因为 Queue.Next 本身会推进队列、改变后续的判断依据。
+        var preloadWasInvalidatedByEdit = NowPlaying.State == NowPlayingState.Independent &&
+            _preloadedPath is { } preloadedPath && TrackIdentity.AreSame(preloadedPath, item.Path) &&
+            _preloadVersion != _listVersion;
 
-        if (expected is { } e && e >= 0 && e < Tracks.Count &&
-            string.Equals(Tracks[e].Path, item.Path, StringComparison.OrdinalIgnoreCase))
+        // 推进播放队列。正常情况它给出的就是引擎已经切到的那首；
+        // 若期间播放列表被编辑过，就按路径重新对齐（下标现在指 NowPlaying.Items）。
+        var expected = NowPlaying.Queue.Next(auto: true);
+        var items = NowPlaying.Items;
+
+        var matchesExpected = expected is { } e && e >= 0 && e < items.Count && TrackIdentity.AreSame(items[e].Path, item.Path);
+
+        if (preloadWasInvalidatedByEdit && !matchesExpected)
         {
-            CurrentIndex = e;
+            System.Diagnostics.Debug.WriteLine("[NowPlaying] preload invalidated by edit");
+            LoadQueueCurrentOrStop(expected, items);
+            return;
         }
-        else if (actual >= 0)
+
+        int index;
+        if (matchesExpected)
         {
-            _queue.Select(actual);
-            CurrentIndex = actual;
+            index = expected!.Value;
         }
         else
         {
-            // 这首已被搜索过滤掉，继续播但列表里不高亮
-            CurrentIndex = -1;
+            index = IndexOfItemPath(items, item.Path);
+            if (index >= 0) NowPlaying.SelectInList(index);
         }
 
-        var track = CurrentIndex >= 0
-            ? Tracks[CurrentIndex]
-            : _library.FirstOrDefault(t =>
-                  string.Equals(t.Path, item.Path, StringComparison.OrdinalIgnoreCase))
-              ?? new Track(item.Path);
+        NowPlayingIndex = index;
+        CurrentIndex = IndexOfPath(item.Path);
+
+        var track = ResolveAdvancedTrack(items, index, _library, item.Path);
 
         PlayingTrack = track;
         CurrentTime = 0;
@@ -737,6 +1332,60 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
         _consecutiveFailures = 0;
         UpdatePlayingTrackMissing();
     }
+
+    /// <summary>
+    /// E-2：预加载的内容被编辑作废时，立即加载队列现在真正给出的那一首（不是无缝切歌）。
+    /// <paramref name="queueGivenIndex"/> 是已经推进过的 <c>Queue.Next(auto: true)</c> 的结果。
+    /// </summary>
+    private void LoadQueueCurrentOrStop(int? queueGivenIndex, IReadOnlyList<Track> items)
+    {
+        if (queueGivenIndex is not { } index || index < 0 || index >= items.Count)
+        {
+            Stop();
+            NowPlayingIndex = -1;
+            return;
+        }
+
+        var track = items[index];
+        NowPlayingIndex = index;
+        CurrentIndex = IndexOfPath(track.Path);
+        PlayingTrack = track;
+        PlayingTrackMissing = false;
+        CurrentTime = 0;
+        Duration = track.Duration;
+        RefreshLyrics(track);
+
+        _engine.Load(ToPlayable(track));
+        IsPlaying = _engine.IsPlaying;
+        _consecutiveFailures = 0;
+    }
+
+    /// <summary>在 <see cref="NowPlaying"/>.Items 里按路径定位，用于自动切歌时重新对齐队列。</summary>
+    private static int IndexOfItemPath(IReadOnlyList<Track> items, string path)
+    {
+        var key = TrackIdentity.Normalize(path);
+        for (var i = 0; i < items.Count; i++)
+            if (string.Equals(items[i].IdentityKey, key, StringComparison.OrdinalIgnoreCase))
+                return i;
+        return -1;
+    }
+
+    /// <summary>
+    /// 自动切歌时，队列给出的下标在 <paramref name="items"/> 里找不到该显示谁（v4 修复 M-1）。
+    /// <para>
+    /// 先在 <paramref name="items"/> 里找（<paramref name="index"/> 有效就直接用）；
+    /// 再退回 <paramref name="library"/>——跟随状态下，引擎切到的这首恰好被搜索过滤掉了，
+    /// 但仍在曲库里，要用曲库里已经加载好元数据的那个对象，否则标题会变回文件名、
+    /// 内嵌歌词和 ReplayGain 也会丢失（基线原有行为，FR-003 要求保持一致）；
+    /// 都找不到（例如来自歌单的独立状态）才新建一个没有元数据的 <see cref="Track"/>。
+    /// </para>
+    /// <para>拆成静态方法是为了不依赖播放引擎就能单测这条分支（<c>internal</c> 供测试调用）。</para>
+    /// </summary>
+    internal static Track ResolveAdvancedTrack(IReadOnlyList<Track> items, int index, IReadOnlyList<Track> library, string path) =>
+        index >= 0
+            ? items[index]
+            : library.FirstOrDefault(t => TrackIdentity.AreSame(t.Path, path))
+              ?? new Track(path);
 
     /// <summary>组装引擎需要的播放条目：路径 + 归一化增益 + 采样率。</summary>
     private PlayableItem ToPlayable(Track track)
@@ -763,24 +1412,23 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
 
         // 引擎会提前把下一首解码好挂进管线以实现无缝切歌。
         // PeekNext 不能有副作用 —— 此刻当前曲还在播，队列位置不能动。
+        // 用 PeekNextWhere 跳过已知不可用的曲目（T-007 方案 v1 §2.4）。
         _engine.ProvideNext = () =>
         {
-            if (_queue.PeekNext(auto: true) is not { } index) return null;
-            if (index < 0 || index >= Tracks.Count) return null;
-            return ToPlayable(Tracks[index]);
+            var items = NowPlaying.Items;
+            if (NowPlaying.Queue.PeekNextWhere(i => i >= 0 && i < items.Count && items[i].IsAvailable, auto: true) is not { } index)
+                return null;
+
+            var track = items[index];
+            // E-2：记下预加载的是哪首、当时的列表版本，供 HandleAutoAdvance 判断编辑有没有作废它
+            _preloadedPath = track.Path;
+            _preloadVersion = _listVersion;
+            return ToPlayable(track);
         };
 
         _engine.Advanced += HandleAutoAdvance;
 
-        _engine.QueueExhausted += () =>
-        {
-            // 管线里没有下一首了。顺序播放到底就是停；随机模式一轮播完时
-            // PeekNext 拿不到新顺序，此处补一次真正的推进。
-            if (_queue.Next(auto: true) is { } next && next >= 0 && next < Tracks.Count)
-                StartCurrent();
-            else
-                Stop();
-        };
+        _engine.QueueExhausted += () => Advance(auto: true);
 
         _engine.DurationResolved += seconds =>
         {
@@ -789,20 +1437,27 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
             if (_playingTrack is { Duration: 0 } track) track.Duration = seconds;
         };
 
-        _engine.Error += message =>
+        _engine.Error += async message =>
         {
+            // T-007 方案 v1 §2.4：先看文件是不是还在，不在就标记为不可用——放到线程池执行、
+            // 最多等 1 秒，不能在这个回调（已经在 UI 线程上）里直接调用 File.Exists
+            if (_playingTrack is { } current)
+            {
+                bool stillExists;
+                try { stillExists = await Task.Run(() => File.Exists(current.Path)).WaitAsync(TimeSpan.FromSeconds(1)); }
+                catch (TimeoutException) { stillExists = false; }
+                if (!stillExists) current.IsAvailable = false;
+            }
+
             ErrorMessage = message;
             IsPlaying = false;
 
             // 坏文件不该卡住播放，自动跳过；但整个列表都放不出来时必须停下，
             // 否则会在队列里无限打转。
             _consecutiveFailures++;
-            if (_consecutiveFailures >= Math.Max(1, Tracks.Count))
+            if (_consecutiveFailures >= Math.Max(1, NowPlaying.Items.Count))
             {
-                ErrorMessage = "列表中的音频都无法播放，已停止";
-                _engine.Unload();
-                CurrentIndex = -1;
-                PlayingTrack = null;
+                StopBecauseAllTracksUnavailable();
                 return;
             }
 
@@ -823,6 +1478,9 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
     {
         _metadataCts?.Cancel();
         _metadataCts?.Dispose();
+        _saveDebounceCts?.Cancel();
+        _saveDebounceCts?.Dispose();
         _engine.Dispose();
+        Availability.Dispose();
     }
 }
