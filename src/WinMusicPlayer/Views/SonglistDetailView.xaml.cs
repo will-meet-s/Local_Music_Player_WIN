@@ -8,6 +8,9 @@ using MusicCore.Models;
 using MusicCore.Support;
 using MusicCore.ViewModels;
 using Windows.System;
+// DispatcherQueueTimer 存在于 Microsoft.UI.Dispatching 和 Windows.System 两个命名空间，
+// 本文件两个 using 都要（后者给 VirtualKey 用），裸名字会编译失败（CI 实测，CS0104）
+using DispatcherQueueTimer = Microsoft.UI.Dispatching.DispatcherQueueTimer;
 
 namespace WinMusicPlayer.Views;
 
