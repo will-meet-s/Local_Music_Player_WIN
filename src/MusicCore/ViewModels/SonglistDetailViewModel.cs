@@ -40,6 +40,10 @@ public sealed class SonglistDetailViewModel : ObservableObject, IDisposable
     /// 整个歌单，不受当前搜索词影响。</summary>
     public IReadOnlyList<Track> AllTracks => _allTracks;
 
+    /// <summary>歌单的曲目总数，不随搜索变化（界面接入方案 v1.1 §2.6 M-3）：标题旁边显示的
+    /// 「N 首」要的是总数，不是 <see cref="Displayed"/> 的匹配条数。</summary>
+    public int TotalCount => _allTracks.Count;
+
     public string Name
     {
         get => _name;
@@ -74,6 +78,7 @@ public sealed class SonglistDetailViewModel : ObservableObject, IDisposable
             .ToList();
 
         Name = _service.GetAll().FirstOrDefault(s => s.Id == _songlistId)?.Name ?? "";
+        Raise(nameof(TotalCount));
 
         RebuildDisplayed();
     }
@@ -86,11 +91,24 @@ public sealed class SonglistDetailViewModel : ObservableObject, IDisposable
         Raise(nameof(EmptyMessage));
     }
 
-    /// <summary>歌单内容变化时（T-004、T-005 的 Changed 事件）重新过滤（T-012 方案 §2.1）。
-    /// <c>Id</c> 为 null 表示全量重新加载（<c>Reloaded</c>），也当作和本歌单相关来处理。</summary>
+    /// <summary>
+    /// 歌单内容变化时（T-004、T-005 的 Changed 事件）重新过滤（T-012 方案 §2.1）。
+    /// <c>Id</c> 为 null 表示全量重新加载（<c>Reloaded</c>），也当作和本歌单相关来处理。
+    /// <para>
+    /// 本歌单被删除时不调用 <see cref="Reload"/>（界面接入方案 v1.1 §3 M-2 补测时发现）：
+    /// <see cref="SonglistsViewModel"/> 订阅 <c>Changed</c> 比本类早（它在 <see cref="SonglistsViewModel.Open"/>
+    /// 时才构造这个实例），同一次 <c>Changed?.Invoke</c> 里，它会先处理完并
+    /// <see cref="IDisposable.Dispose"/> 掉当前打开的详情页——但 .NET 的多播委托按调用那一刻的
+    /// 快照顺序执行，取消订阅拦不住这一次已经在进行中的分发，这个方法仍然会被调用到。这时
+    /// <c>_songlistId</c> 已经从 <see cref="_service"/> 里删掉了，<see cref="Reload"/> 读
+    /// <see cref="SonglistService.GetEntries"/> 会直接抛 <see cref="SonglistException"/>。
+    /// 删除之后没有什么可以重新加载的，调用方会紧接着丢弃这个实例，这里安静返回即可。
+    /// </para>
+    /// </summary>
     private void OnSonglistChanged(SonglistChange change)
     {
         if (change.Id is { } id && id != _songlistId) return;
+        if (change.Kind == SonglistChangeKind.Deleted) return;
         Reload();
     }
 

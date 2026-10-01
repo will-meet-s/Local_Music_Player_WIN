@@ -19,7 +19,7 @@ namespace MusicCore.ViewModels;
 /// <see cref="CurrentIndex"/>（曲库列表高亮）与 <see cref="NowPlayingIndex"/>（播放列表高亮）分别独立维护。
 /// </para>
 /// </summary>
-public sealed class PlayerViewModel : ObservableObject, IDisposable
+public sealed class PlayerViewModel : ObservableObject, IDisposable, ISonglistsHost
 {
     private readonly PlayerEngine _engine = new();
     private readonly Preferences _preferences;

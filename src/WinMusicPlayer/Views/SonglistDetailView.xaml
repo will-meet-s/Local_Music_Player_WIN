@@ -30,7 +30,7 @@
                 <TextBlock Text="{x:Bind SonglistsVm.Opened.Name, Mode=OneWay}"
                            TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis"
                            ToolTipService.ToolTip="{x:Bind SonglistsVm.Opened.Name, Mode=OneWay}" />
-                <TextBlock Text="{x:Bind views:ViewFormat.SonglistCount(SonglistsVm.Opened.Displayed.Count), Mode=OneWay}"
+                <TextBlock Text="{x:Bind views:ViewFormat.SonglistCount(SonglistsVm.Opened.TotalCount), Mode=OneWay}"
                            FontSize="11" Foreground="{StaticResource SecondaryTextBrush}" />
             </StackPanel>
         </Grid>
