@@ -1,4 +1,5 @@
-﻿using System.Text.Json;
+﻿using System.Text;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using MusicCore.Library;
 using MusicCore.Models;
@@ -93,21 +94,57 @@ public sealed class Preferences
         }
     }
 
+    /// <summary>SEC-05（安全审计 2026-10-01）：原来直接 <see cref="File.WriteAllText(string, string)"/>
+    /// 整个文件，写到一半被杀（断电、强制结束进程）会把 <c>settings.json</c> 截断成一半的 JSON，
+    /// 下次 <see cref="Load"/> 解析失败，回退默认值，等于把文件夹、音量、桌面歌词这些设置全部丢光。
+    /// 改成写临时文件再 <see cref="File.Move(string, string, bool)"/> 原地替换（同一个磁盘卷上是原子操作），
+    /// 写法照搬 <see cref="MusicCore.Playback.NowPlayingStore"/> 已经评审过的那一套（SEC-01、SEC-03a）。</summary>
     public void Save()
     {
         try
         {
             lock (SaveGate)
             {
-                var directory = Path.GetDirectoryName(FilePath)!;
-                Directory.CreateDirectory(directory);
-                File.WriteAllText(FilePath, Serialize());
+                SaveToFile(FilePath, Serialize());
             }
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             // 存不下就算了，不值得打断用户
         }
+    }
+
+    /// <summary>核心逻辑抽出 <paramref name="filePath"/> 参数，方便单测写到临时目录，
+    /// 不碰真实的 <see cref="FilePath"/>（SEC-05 单测）。</summary>
+    internal static void SaveToFile(string filePath, string json)
+    {
+        var directory = Path.GetDirectoryName(filePath)!;
+        Directory.CreateDirectory(directory);
+
+        var tmpPath = $"{filePath}.tmp-{Environment.ProcessId}";
+        try
+        {
+            WriteTempFile(tmpPath, json);
+            File.Move(tmpPath, filePath, overwrite: true);
+        }
+        catch
+        {
+            TryDelete(tmpPath);
+            throw;
+        }
+    }
+
+    private static void WriteTempFile(string tmpPath, string json)
+    {
+        var bytes = new UTF8Encoding(false).GetBytes(json);
+        using var fs = new FileStream(tmpPath, FileMode.Create, FileAccess.Write, FileShare.None);
+        fs.Write(bytes, 0, bytes.Length);
+        fs.Flush(true);
+    }
+
+    private static void TryDelete(string path)
+    {
+        try { File.Delete(path); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
     }
 
     public static double ClampOpacity(double value) => Math.Clamp(value, MinBackgroundOpacity, 1.0);

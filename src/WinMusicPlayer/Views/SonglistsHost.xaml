@@ -1,0 +1,11 @@
+<UserControl
+    x:Class="WinMusicPlayer.Views.SonglistsHost"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- 「歌单」页签内部的列表/详情切换（UI-2）：LibraryPane 的三个页签之一，这里再套一层，
+         在歌单列表页和歌单详情页之间切换，做法和 LibraryPane 本身一样——整体替换内容。 -->
+    <ContentControl x:Name="Host"
+                     HorizontalContentAlignment="Stretch"
+                     VerticalContentAlignment="Stretch" />
+</UserControl>

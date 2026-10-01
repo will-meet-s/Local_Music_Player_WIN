@@ -1,0 +1,25 @@
+<UserControl
+    x:Class="WinMusicPlayer.Views.LibraryPane"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- 左栏容器（UI-1，T-001+T-008 v5 §4.5）：顶部页签 + 下面替换内容，没打开的页不放进视觉树，
+         避免 1 万首的列表在后台跟着刷新（方案 §7 坑 4：不能靠 Visibility 藏起来）。 -->
+    <Grid Background="{StaticResource SidebarBrush}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <SelectorBar x:Name="PaneSelector" Grid.Row="0" Margin="10,8,10,0"
+                     SelectionChanged="OnSelectorSelectionChanged">
+            <SelectorBarItem Text="曲库" />
+            <SelectorBarItem Text="歌单" />
+            <SelectorBarItem Text="播放列表" />
+        </SelectorBar>
+
+        <ContentControl x:Name="PaneContent" Grid.Row="1"
+                        HorizontalContentAlignment="Stretch"
+                        VerticalContentAlignment="Stretch" />
+    </Grid>
+</UserControl>

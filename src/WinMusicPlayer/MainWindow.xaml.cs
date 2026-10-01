@@ -1,6 +1,9 @@
+using System.ComponentModel;
 using Microsoft.UI;
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
 using MusicCore.ViewModels;
 using WinMusicPlayer.Interop;
 using WinMusicPlayer.Views;
@@ -15,6 +18,8 @@ public sealed partial class MainWindow : Window
     private bool _sizingInitialized;
     private double _lastRasterizationScale;
     private bool _picking;
+
+    private readonly DispatcherQueueTimer _noticeTimer;
 
     public MainWindow()
     {
@@ -39,7 +44,24 @@ public sealed partial class MainWindow : Window
 
         // 主窗口只创建一次，不需要退订
         App.ViewModel.FolderPickRequested += PickFolder;
+
+        // Notice 提示条（T-008，界面接入方案 v1 §2.2）：3 秒后自动关闭，用户手动关闭时同样清空
+        _noticeTimer = DispatcherQueue.CreateTimer();
+        _noticeTimer.Interval = TimeSpan.FromSeconds(3);
+        _noticeTimer.IsRepeating = false;
+        _noticeTimer.Tick += (_, _) => ViewModel.Notice = null;
+        ViewModel.PropertyChanged += OnNoticeViewModelPropertyChanged;
     }
+
+    private void OnNoticeViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(PlayerViewModel.Notice)) return;
+
+        _noticeTimer.Stop();
+        if (ViewModel.Notice is not null) _noticeTimer.Start();
+    }
+
+    private void OnNoticeCloseButtonClick(InfoBar sender, object args) => ViewModel.Notice = null;
 
     /// <summary>各视图统一通过它拿到唯一的 ViewModel 实例，再用 x:Bind 绑定。</summary>
     public PlayerViewModel ViewModel => App.ViewModel;

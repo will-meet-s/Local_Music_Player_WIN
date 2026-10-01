@@ -1,4 +1,5 @@
 ﻿using System.ComponentModel;
+using MusicCore.Library;
 using MusicCore.Playback;
 
 namespace MusicCore.Models;
@@ -18,6 +19,7 @@ public sealed class Track : IEquatable<Track>, INotifyPropertyChanged
     public Track(string path)
     {
         Path = path;
+        IdentityKey = TrackIdentity.Normalize(path);
         Title = System.IO.Path.GetFileNameWithoutExtension(path);
     }
 
@@ -34,8 +36,12 @@ public sealed class Track : IEquatable<Track>, INotifyPropertyChanged
         return true;
     }
 
-    /// <summary>完整文件路径，同时用作唯一标识。</summary>
+    /// <summary>完整文件路径，用于显示和打开文件 —— 不要替换成规范化后的结果，
+    /// 否则歌词侧车文件（<see cref="Library.LyricsProvider"/> 按路径查找 .lrc）和界面显示会跟着变。</summary>
     public string Path { get; }
+
+    /// <summary>规范化后的路径，用作相等性判断（FR-026，见 <see cref="TrackIdentity"/>）。</summary>
+    internal string IdentityKey { get; }
 
     private string _title = "";
     public string Title
@@ -87,6 +93,16 @@ public sealed class Track : IEquatable<Track>, INotifyPropertyChanged
     /// <summary>元数据是否已异步加载完成。重扫时用它跳过已读条目。</summary>
     public bool MetadataLoaded { get; set; }
 
+    private bool _isAvailable = true;
+
+    /// <summary>false 表示最近一次检查时文件不存在，或者它所在的根目录不可达。默认 true
+    /// （T-007 方案 v1 §2.1，FR-021 ⑥：检查完成之前按可用显示）。不做持久化。</summary>
+    public bool IsAvailable
+    {
+        get => _isAvailable;
+        internal set => Set(ref _isAvailable, value, nameof(IsAvailable));
+    }
+
     /// <summary>副标题：「艺术家 — 专辑」，缺失部分自动省略。</summary>
     public string Subtitle
     {
@@ -101,9 +117,9 @@ public sealed class Track : IEquatable<Track>, INotifyPropertyChanged
 
     // 路径即身份 —— 元数据变化不应影响相等性判断，否则列表里的曲目会「换了一首」
     public bool Equals(Track? other) =>
-        other is not null && string.Equals(Path, other.Path, StringComparison.OrdinalIgnoreCase);
+        other is not null && string.Equals(IdentityKey, other.IdentityKey, StringComparison.OrdinalIgnoreCase);
 
     public override bool Equals(object? obj) => Equals(obj as Track);
 
-    public override int GetHashCode() => StringComparer.OrdinalIgnoreCase.GetHashCode(Path);
+    public override int GetHashCode() => StringComparer.OrdinalIgnoreCase.GetHashCode(IdentityKey);
 }

@@ -1,0 +1,19 @@
+<ContentDialog
+    x:Class="WinMusicPlayer.Views.SonglistNameDialog"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    PrimaryButtonText="确定"
+    CloseButtonText="取消"
+    DefaultButton="Primary"
+    IsPrimaryButtonEnabled="False"
+    PrimaryButtonClick="OnPrimaryButtonClick">
+
+    <!-- 新建、重命名共用（T-003 v7 §2.5）：不设 MaxLength（按 UTF-16 编码单元计数，emoji 会算成 2 个），
+         在 TextChanging 里按字符数处理换行和 100 字符上限。 -->
+    <StackPanel MinWidth="280" Spacing="8">
+        <TextBox x:Name="NameBox" TextChanging="OnNameBoxTextChanging" />
+        <TextBlock x:Name="ErrorText"
+                   Foreground="Orange" FontSize="12"
+                   TextWrapping="Wrap" Visibility="Collapsed" />
+    </StackPanel>
+</ContentDialog>

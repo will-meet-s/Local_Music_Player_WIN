@@ -28,9 +28,18 @@
             </Grid>
         </Border>
 
-        <TextBlock Grid.Row="1" Text="{x:Bind ViewModel.PlayingTitle, Mode=OneWay}"
-                   FontSize="17" FontWeight="SemiBold" HorizontalAlignment="Center"
-                   TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" MaxLines="1" />
+        <!-- T-004 §2.4：歌名旁边的「添加到歌单」按钮，PlayingTrack 为 null 时不可用 -->
+        <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Center">
+            <TextBlock Text="{x:Bind ViewModel.PlayingTitle, Mode=OneWay}"
+                       FontSize="17" FontWeight="SemiBold"
+                       TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" MaxLines="1"
+                       VerticalAlignment="Center" />
+            <Button Margin="6,0,0,0" Style="{StaticResource IconButton}"
+                    FontSize="13" Padding="4"
+                    Content="&#xE710;" Click="OnAddPlayingTrackToSonglistClick"
+                    IsEnabled="{x:Bind views:ViewFormat.HasValue(ViewModel.PlayingTrack), Mode=OneWay}"
+                    ToolTipService.ToolTip="添加到歌单" />
+        </StackPanel>
 
         <TextBlock Grid.Row="2" Text="{x:Bind ViewModel.PlayingSubtitle, Mode=OneWay}"
                    Margin="0,3,0,0" HorizontalAlignment="Center"
