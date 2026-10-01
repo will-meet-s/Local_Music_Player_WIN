@@ -85,17 +85,33 @@
                                VerticalAlignment="Center" />
                 </StackPanel>
             </Button>
+
+            <!-- 搜索中禁止挪动（T-005 §2）：过滤后的结果里，"挪到第几位"对应不到完整列表里的确定位置 -->
+            <TextBlock Margin="0,6,0,0" FontSize="11" Foreground="{StaticResource SecondaryTextBrush}"
+                       Text="清空搜索后可以调整顺序"
+                       Visibility="{x:Bind SonglistsVm.Opened.IsFiltering, Mode=OneWay}" />
         </StackPanel>
 
         <Border Grid.Row="2" Height="1" Background="{StaticResource SeparatorBrush}" />
 
         <Grid Grid.Row="3">
+            <!-- 拖动排序（T-005 §2）：CanReorderItems 保持 false、ReorderMode 保持 Disabled，自己处理
+                 Drop，不让 ListView 直接改集合、绕过落盘流程。搜索中 CanDragItems=false（T-012）。 -->
             <ListView x:Name="TrackList"
-                      SelectionMode="Single"
+                      SelectionMode="Extended"
                       Background="Transparent"
                       ItemsSource="{x:Bind SonglistsVm.Opened.Displayed, Mode=OneWay}"
                       ItemTemplate="{StaticResource TrackRowTemplate}"
-                      DoubleTapped="OnTrackListDoubleTapped" />
+                      DoubleTapped="OnTrackListDoubleTapped"
+                      RightTapped="OnTrackListRightTapped"
+                      KeyDown="OnTrackListKeyDown"
+                      CanDragItems="{x:Bind views:ViewFormat.Not(SonglistsVm.Opened.IsFiltering), Mode=OneWay}"
+                      AllowDrop="True"
+                      CanReorderItems="False"
+                      ReorderMode="Disabled"
+                      DragItemsStarting="OnDragItemsStarting"
+                      DragOver="OnDragOver"
+                      Drop="OnDrop" />
 
             <!-- 空态：歌单本身为空，或者搜索没有结果（文字由 SonglistDetailViewModel.EmptyMessage 区分） -->
             <StackPanel x:Name="EmptyState"

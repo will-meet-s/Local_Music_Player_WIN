@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices.WindowsRuntime;
+using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
@@ -25,6 +26,17 @@ public sealed partial class NowPlayingView : UserControl
     }
 
     public PlayerViewModel ViewModel => App.ViewModel;
+
+    /// <summary>T-004 §2.4：添加的对象是 PlayingTrack，不是整个播放列表——按钮为 null 时不可用，
+    /// 这里拿到的永远非 null，但仍然防御一次（例如正要切歌的极小窗口期）。</summary>
+    private void OnAddPlayingTrackToSonglistClick(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel.PlayingTrack is not { } track) return;
+
+        var menu = TrackMenus.BuildAddToSonglistFlat(XamlRoot, App.SonglistsVm,
+            () => new[] { track }, () => App.SonglistsVm.Items.ToList());
+        menu.ShowAt((FrameworkElement)sender);
+    }
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {

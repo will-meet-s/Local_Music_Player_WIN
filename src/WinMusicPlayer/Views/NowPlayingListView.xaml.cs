@@ -1,17 +1,22 @@
 using System.Collections.Specialized;
 using System.ComponentModel;
+using Microsoft.UI.Input;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using MusicCore.Models;
+using MusicCore.Songlists;
 using MusicCore.ViewModels;
+using Windows.System;
 using Windows.UI;
 
 namespace WinMusicPlayer.Views;
 
 public sealed partial class NowPlayingListView : UserControl
 {
+    private Track? _draggedTrack;
+
     public NowPlayingListView()
     {
         InitializeComponent();
@@ -53,6 +58,102 @@ public sealed partial class NowPlayingListView : UserControl
 
         var index = ViewModel.NowPlaying.Items.IndexOf(track);
         if (index >= 0) ViewModel.PlayNowPlayingAtCommand.Execute(index);
+    }
+
+    // MARK: - 标题栏按钮（UI-3，T-011、T-008）
+
+    /// <summary>一定要在打开对话框之前取快照（T-011 §7 坑）：对话框打开期间播放列表又变了
+    /// （比如自动切歌），保存的仍然是点击按钮那一刻的内容。</summary>
+    private async void OnSaveAsSonglistClick(object sender, RoutedEventArgs e)
+    {
+        var snapshot = ViewModel.CaptureNowPlayingSnapshot();
+
+        var dialog = new SonglistNameDialog("存为歌单", "",
+            name => App.SonglistsVm.ValidateName(name, null),
+            async name =>
+            {
+                var result = await ViewModel.SaveSnapshotAsSonglistAsync(name, snapshot);
+                if (result.Success) return null; // Notice 已经在 SaveSnapshotAsSonglistAsync 里设置好了
+                if (result.Error == SonglistErrorCode.SaveFailed) return null; // ErrorMessage 同上
+                return SonglistNotices.ForError(result.Error!.Value, result.FailureReason, name);
+            })
+        {
+            XamlRoot = XamlRoot
+        };
+        await dialog.ShowAsync();
+    }
+
+    private void OnClearClick(object sender, RoutedEventArgs e) => ViewModel.ClearNowPlayingCommand.Execute(null);
+
+    // MARK: - 多选、右键菜单（UI-3，T-008 §4.5）
+
+    private void OnTrackListRightTapped(object sender, RightTappedRoutedEventArgs e)
+    {
+        var tappedItem = (e.OriginalSource as FrameworkElement)?.DataContext;
+        TrackMenus.EnsureRightTappedItemIsSelected(TrackList, tappedItem);
+
+        var menu = TrackMenus.BuildForNowPlaying(XamlRoot, ViewModel, App.SonglistsVm,
+            () => SelectionOrder.TracksByListOrder(TrackList, ViewModel.NowPlaying.Items),
+            () => SelectionOrder.IndicesByListOrder(TrackList));
+        menu.ShowAt(TrackList, e.GetPosition(TrackList));
+    }
+
+    // MARK: - 键盘：Delete 移除，Alt+↑/↓ 调整顺序（T-008 §4.5）
+
+    private void OnTrackListKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key == VirtualKey.Delete)
+        {
+            var indices = SelectionOrder.IndicesByListOrder(TrackList);
+            if (indices.Count > 0) ViewModel.RemoveFromNowPlayingCommand.Execute(indices);
+            e.Handled = true;
+            return;
+        }
+
+        if (TrackList.SelectedItems.Count != 1) return; // 多选时不响应
+
+        var isAltDown = InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Menu)
+            .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
+        if (!isAltDown) return;
+
+        var from = TrackList.SelectedIndex;
+        if (e.Key == VirtualKey.Up && from > 0)
+        {
+            ViewModel.MoveInNowPlaying(from, from - 1);
+            e.Handled = true;
+        }
+        else if (e.Key == VirtualKey.Down && from < ViewModel.NowPlaying.Items.Count - 1)
+        {
+            ViewModel.MoveInNowPlaying(from, from + 1);
+            e.Handled = true;
+        }
+    }
+
+    // MARK: - 拖动排序（T-008 §4.5）
+
+    private void OnDragItemsStarting(object sender, DragItemsStartingEventArgs e)
+    {
+        // 一次只拖一首：多选时只取被按住的那一首
+        _draggedTrack = e.Items.OfType<Track>().FirstOrDefault();
+    }
+
+    private void OnDragOver(object sender, DragEventArgs e) =>
+        e.AcceptedOperation = Windows.ApplicationModel.DataTransfer.DataPackageOperation.Move;
+
+    private void OnDrop(object sender, DragEventArgs e)
+    {
+        var dragged = _draggedTrack;
+        _draggedTrack = null;
+        if (dragged is null) return;
+
+        var from = ViewModel.NowPlaying.Items.IndexOf(dragged);
+        if (from < 0) return;
+
+        var toIndex = SelectionOrder.ComputeDropIndexAfterRemoval(
+            TrackList, e.GetPosition(TrackList), from, ViewModel.NowPlaying.Items.Count);
+        if (toIndex == from) return;
+
+        ViewModel.MoveInNowPlaying(from, toIndex);
     }
 
     // MARK: - 当前行视觉（播放图标 + 强调色文字）

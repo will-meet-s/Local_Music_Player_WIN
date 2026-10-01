@@ -80,13 +80,16 @@
         <Border Grid.Row="1" Height="1" Background="{StaticResource SeparatorBrush}" />
 
         <Grid Grid.Row="2">
+            <!-- Extended 支持 Ctrl/Shift 多选（T-008 §4.5）；SelectedIndex 不再绑 CurrentIndex——
+                 代码后置里按选中数量决定要不要跟着 CurrentIndex 走（方案 §2.6 末段：Extended 模式下
+                 绑定 SelectedIndex 会把用户的多选冲掉）。 -->
             <ListView x:Name="TrackList"
-                      SelectionMode="Single"
+                      SelectionMode="Extended"
                       Background="Transparent"
                       ItemsSource="{x:Bind ViewModel.Tracks, Mode=OneWay}"
-                      SelectedIndex="{x:Bind ViewModel.CurrentIndex, Mode=OneWay}"
                       ItemTemplate="{StaticResource TrackRowTemplate}"
-                      DoubleTapped="OnTrackListDoubleTapped" />
+                      DoubleTapped="OnTrackListDoubleTapped"
+                      RightTapped="OnTrackListRightTapped" />
 
             <!-- 空态：文件夹没选、文件夹里没歌、或者搜不到。显示与否由代码后置控制，见 .xaml.cs -->
             <StackPanel x:Name="EmptyState"

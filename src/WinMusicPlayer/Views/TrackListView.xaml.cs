@@ -37,6 +37,7 @@ public sealed partial class TrackListView : UserControl
 
         UpdateEmptyState();
         UpdateMatchCount();
+        SyncSelectedIndexFromCurrentIndex();
     }
 
     public PlayerViewModel ViewModel => App.ViewModel;
@@ -66,6 +67,19 @@ public sealed partial class TrackListView : UserControl
         // 走命令而不是直接调用 PlayAt：PlayAt 是 async Task，直接调用会产生 CS4014 未等待调用，
         // 异常也接不住；PlayAtCommand 内部用 Observe 包了一层，异常会写进 ErrorMessage（界面接入方案 v1 §2.2）
         if (index >= 0) ViewModel.PlayAtCommand.Execute(index);
+    }
+
+    // MARK: - 多选、右键菜单（UI-3，T-008 §4.5、T-004 §2.4）
+
+    private void OnTrackListRightTapped(object sender, RightTappedRoutedEventArgs e)
+    {
+        var tappedItem = (e.OriginalSource as FrameworkElement)?.DataContext;
+        TrackMenus.EnsureRightTappedItemIsSelected(TrackList, tappedItem);
+
+        var menu = TrackMenus.BuildForTracks(XamlRoot, ViewModel, App.SonglistsVm,
+            () => SelectionOrder.TracksByListOrder(TrackList, ViewModel.Tracks),
+            () => App.SonglistsVm.Items.ToList());
+        menu.ShowAt(TrackList, e.GetPosition(TrackList));
     }
 
     // MARK: - 搜索
@@ -132,7 +146,21 @@ public sealed partial class TrackListView : UserControl
             case nameof(PlayerViewModel.SortAscending):
                 ScrollToTopDeferred();
                 break;
+            case nameof(PlayerViewModel.CurrentIndex):
+                SyncSelectedIndexFromCurrentIndex();
+                break;
         }
+    }
+
+    /// <summary>
+    /// Extended 多选模式下不能再绑 <c>SelectedIndex="{x:Bind ViewModel.CurrentIndex}"</c>——
+    /// 曲库换曲目会把用户的多选冲掉（方案 §2.6 末段）。只在用户没有多选（选中数 ≤ 1）时才跟着
+    /// <see cref="PlayerViewModel.CurrentIndex"/> 走，这样单选时的表现和基线一致。
+    /// </summary>
+    private void SyncSelectedIndexFromCurrentIndex()
+    {
+        if (TrackList.SelectedItems.Count > 1) return;
+        TrackList.SelectedIndex = ViewModel.CurrentIndex;
     }
 
     private void SyncSearchBox()

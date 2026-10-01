@@ -3,9 +3,9 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
-    <!-- 播放列表页（UI-1，T-001+T-008 v5 §4.5）：顶部标题，列表用共用的行模板，
-         当前播放那一行的图标/强调色由代码后置通过 ContainerContentChanging 覆盖
-         （共用模板本身不知道"谁在播放"，见 Themes/TrackRowTemplate.xaml 的注释）。 -->
+    <!-- 播放列表页（UI-1、UI-3，T-001+T-008 v5 §4.5、T-011）：顶部标题 + 存为歌单/清空按钮，
+         列表用共用的行模板；当前播放那一行的图标/强调色由代码后置通过 ContainerContentChanging
+         覆盖（共用模板本身不知道"谁在播放"，见 Themes/TrackRowTemplate.xaml 的注释）。 -->
     <Grid Background="{StaticResource SidebarBrush}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -13,21 +13,65 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <TextBlock Grid.Row="0" Margin="10,8"
-                   Text="{x:Bind ViewModel.NowPlayingHeader, Mode=OneWay}"
-                   Foreground="{StaticResource SecondaryTextBrush}" FontSize="12"
-                   TextTrimming="CharacterEllipsis" />
+        <Grid Grid.Row="0" Margin="10,8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <TextBlock Grid.Column="0"
+                       Text="{x:Bind ViewModel.NowPlayingHeader, Mode=OneWay}"
+                       Foreground="{StaticResource SecondaryTextBrush}" FontSize="12"
+                       TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+
+            <!-- T-011：存为歌单，在"清空"左边 -->
+            <Button Grid.Column="1" Style="{StaticResource IconButton}"
+                    FontSize="12" Padding="6,3"
+                    Click="OnSaveAsSonglistClick"
+                    IsEnabled="{x:Bind ViewModel.CanSaveNowPlayingAsSonglist, Mode=OneWay}"
+                    ToolTipService.ToolTip="存为歌单">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock FontFamily="{StaticResource IconFont}" Text="&#xE74E;"
+                               FontSize="12" VerticalAlignment="Center" />
+                    <TextBlock Text="存为歌单" Margin="4,0,0,0" FontSize="12" VerticalAlignment="Center" />
+                </StackPanel>
+            </Button>
+
+            <!-- T-008：清空，不需要二次确认 -->
+            <Button Grid.Column="2" Style="{StaticResource IconButton}"
+                    FontSize="12" Padding="6,3" Margin="4,0,0,0"
+                    Click="OnClearClick"
+                    ToolTipService.ToolTip="清空播放列表">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock FontFamily="{StaticResource IconFont}" Text="&#xE74D;"
+                               FontSize="12" VerticalAlignment="Center" />
+                    <TextBlock Text="清空" Margin="4,0,0,0" FontSize="12" VerticalAlignment="Center" />
+                </StackPanel>
+            </Button>
+        </Grid>
 
         <Border Grid.Row="1" Height="1" Background="{StaticResource SeparatorBrush}" />
 
         <Grid Grid.Row="2">
+            <!-- Extended 多选（T-008 §4.5）；拖动排序：CanReorderItems 保持 false、ReorderMode 保持
+                 Disabled，自己处理 Drop，不让 ListView 直接改集合、绕过队列重映射和落盘流程。 -->
             <ListView x:Name="TrackList"
-                      SelectionMode="Single"
+                      SelectionMode="Extended"
                       Background="Transparent"
                       ItemsSource="{x:Bind ViewModel.NowPlaying.Items, Mode=OneWay}"
                       ItemTemplate="{StaticResource TrackRowTemplate}"
                       DoubleTapped="OnTrackListDoubleTapped"
-                      ContainerContentChanging="OnContainerContentChanging" />
+                      ContainerContentChanging="OnContainerContentChanging"
+                      RightTapped="OnTrackListRightTapped"
+                      KeyDown="OnTrackListKeyDown"
+                      CanDragItems="True"
+                      AllowDrop="True"
+                      CanReorderItems="False"
+                      ReorderMode="Disabled"
+                      DragItemsStarting="OnDragItemsStarting"
+                      DragOver="OnDragOver"
+                      Drop="OnDrop" />
 
             <!-- 空态：播放列表为空 -->
             <StackPanel x:Name="EmptyState"

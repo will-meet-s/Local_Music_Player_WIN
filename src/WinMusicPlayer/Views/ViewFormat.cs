@@ -1,5 +1,6 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media;
+using MusicCore.Models;
 using MusicCore.Support;
 
 namespace WinMusicPlayer.Views;
@@ -20,6 +21,13 @@ internal static class ViewFormat
     /// <summary>同 <see cref="VisibleIfNotEmpty"/>，但返回 <see cref="bool"/>——
     /// <c>InfoBar.IsOpen</c> 是 bool 属性，不是 Visibility（UI-1 Notice 提示条）。</summary>
     public static bool VisibleIfNotEmptyBool(string? text) => !string.IsNullOrEmpty(text);
+
+    /// <summary>x:Bind 没有内置的布尔取反语法，UI-3 的拖动禁用条件要用（搜索中禁止挪动）。</summary>
+    public static bool Not(bool value) => !value;
+
+    /// <summary>「正在播放」区域的「添加到歌单」按钮是否可用（T-004 §2.4）：
+    /// <c>PlayingTrack</c> 为 null 时不可用。</summary>
+    public static bool HasValue(Track? track) => track is not null;
 
     public static string SortGlyph(bool ascending) => ascending ? "\uE74B" : "\uE74A";
 
