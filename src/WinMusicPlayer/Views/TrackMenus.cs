@@ -67,7 +67,7 @@ internal static class TrackMenus
     {
         var menu = new MenuFlyout();
         menu.Opening += (sender, _) =>
-            PopulateSonglistItems(((MenuFlyout)sender!).Items, xamlRoot, songlistsVm, getSelectedTracks, getTargets());
+            PopulateSonglistItems(((MenuFlyout)sender!).Items, xamlRoot, songlistsVm, getSelectedTracks, getTargets);
         return menu;
     }
 
@@ -98,7 +98,7 @@ internal static class TrackMenus
         Func<IReadOnlyList<Track>> getSelectedTracks, Func<IReadOnlyList<SonglistSummary>> getTargets)
     {
         menu.Opening += (_, _) =>
-            PopulateSonglistItems(subItem.Items, xamlRoot, songlistsVm, getSelectedTracks, getTargets());
+            PopulateSonglistItems(subItem.Items, xamlRoot, songlistsVm, getSelectedTracks, getTargets);
     }
 
     private static void PopulateSonglistItems(

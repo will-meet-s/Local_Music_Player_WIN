@@ -236,14 +236,26 @@ public sealed partial class TrackListView : UserControl
     /// <summary>
     /// 滚动算法（T-016 v1 §2.3）：目标行上下各留 2 整行；放不下 5 行时把目标行居中；
     /// 行高不固定（有副标题的行比没有的高），所以不能按「下标 × 固定行高」算，要用实际容器的位置。
+    /// 第 2 步拿不到容器时，按第 6 步退回 <see cref="ScrollIntoViewAlignment.Leading"/> 再重试一次
+    /// 第 1～5 步；第二次还是拿不到，就不再重试，只保证这一行可见。
     /// </summary>
     private void ScrollRowIntoCenterView(int index, Track track)
     {
         TrackList.ScrollIntoView(track);
         TrackList.UpdateLayout();
 
-        if (FindScrollViewer(TrackList) is not { } scrollViewer)
-            return;
+        if (TryScrollWithMargin(index, track)) return;
+
+        TrackList.ScrollIntoView(track, ScrollIntoViewAlignment.Leading);
+        TrackList.UpdateLayout();
+        TryScrollWithMargin(index, track);
+    }
+
+    /// <summary>第 1～5 步：目标行已经可见（<see cref="ScrollRowIntoCenterView"/> 保证），这里只负责
+    /// 把上下各 2 行的留白也滚进可视区域。容器还没生成（极少见）时返回 false，调用方决定要不要重试。</summary>
+    private bool TryScrollWithMargin(int index, Track track)
+    {
+        if (FindScrollViewer(TrackList) is not { } scrollViewer) return false;
 
         var n = ViewModel.Tracks.Count;
         var a = Math.Max(0, index - 2);
@@ -251,11 +263,7 @@ public sealed partial class TrackListView : UserControl
 
         if (TrackList.ContainerFromIndex(a) is not FrameworkElement topContainer ||
             TrackList.ContainerFromIndex(b) is not FrameworkElement bottomContainer)
-        {
-            // 极少见：第 2 步拿不到容器，退回只保证这一行可见，不再重试（T-016 v1 §2.3 第 6 步）
-            TrackList.ScrollIntoView(track, ScrollIntoViewAlignment.Leading);
-            return;
-        }
+            return false;
 
         var top = topContainer.TransformToVisual(scrollViewer).TransformPoint(new Point(0, 0)).Y
                   + scrollViewer.VerticalOffset;
@@ -286,6 +294,7 @@ public sealed partial class TrackListView : UserControl
         }
 
         if (offset is { } value) scrollViewer.ChangeView(null, value, null, disableAnimation: true);
+        return true;
     }
 
     private static ScrollViewer? FindScrollViewer(DependencyObject root)
