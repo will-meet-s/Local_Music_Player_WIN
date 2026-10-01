@@ -60,9 +60,11 @@ internal static class ClickThrough
         }
 
         // DEF-007：只改样式，系统有可能还在用缓存的旧样式，穿透切换不一定真正生效；
-        // 强制重新计算非客户区，并记录切换结果，方便定位「锁定后解不了锁」
+        // 强制重新计算非客户区。readback 是写回以后再读一次的实际值，和写入值对比，
+        // 能看出系统是不是真的按新样式生效了（DEF-007 v2）
         SetWindowPos(hwnd, IntPtr.Zero, 0, 0, 0, 0,
             SwpNoMove | SwpNoSize | SwpNoZOrder | SwpNoActivate | SwpFrameChanged);
-        CrashLog.WriteNote("DesktopLyrics", $"lock={enabled} exstyle=0x{style:X8}");
+        var readback = (long)GetWindowLongPtr(hwnd, GwlExStyle);
+        CrashLog.WriteNote("DesktopLyrics", $"lock={enabled} exstyle=0x{style:X8} readback=0x{readback:X8}");
     }
 }

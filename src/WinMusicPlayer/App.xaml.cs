@@ -30,7 +30,34 @@ public partial class App : Application
     /// <summary>窗口没开时返回 false，这是基线的行为——托盘菜单在桌面歌词关着时不会读到这个值。</summary>
     internal bool IsLyricsLocked => _lyricsWindow?.IsLocked ?? false;
 
-    internal void ToggleLyricsLock() => _lyricsWindow?.SetLocked(!IsLyricsLocked);
+    /// <summary>
+    /// 锁定：沿用原来在当前窗口上改样式的写法。解锁：DEF-007 v2——不在原窗口上改样式，
+    /// 而是把浮层关掉、以「未锁定」状态重新创建，从根上排除「样式改了但没生效」这种情况。
+    /// </summary>
+    internal void ToggleLyricsLock()
+    {
+        var w = _lyricsWindow;
+        if (w is null)
+        {
+            CrashLog.WriteNote("Tray", "toggleLock window=null");
+            return;
+        }
+
+        var before = w.IsLocked;
+        CrashLog.WriteNote("Tray", $"toggleLock before={before}");
+
+        if (!before)
+        {
+            w.SetLocked(true);
+            return;
+        }
+
+        ViewModel.Settings.DesktopLyricsLocked = false;
+        ViewModel.Settings.Save();
+        CloseDesktopLyrics();      // OnClosed 会保存位置
+        ShowDesktopLyrics();       // 新窗口在 OnRootLoaded 里恢复位置；构造时 SetEnabled(false)
+        CrashLog.WriteNote("Tray", $"unlock rebuilt window={(_lyricsWindow is null ? "null" : "open")}");
+    }
 
     /// <summary>主窗口只创建一次，关窗只是隐藏，所以这里不需要像基线那样重建窗口。</summary>
     internal void ShowMainWindow()
@@ -102,9 +129,15 @@ public partial class App : Application
     {
         if (_lyricsWindow is not null) return;
 
-        _lyricsWindow = new DesktopLyricsWindow();
-        _lyricsWindow.Closed += (_, _) => _lyricsWindow = null;
-        _lyricsWindow.ShowWithoutActivation();
+        // DEF-007 v2：解锁会先关掉旧窗口、再调这个方法建新窗口。旧窗口的 Closed 可能晚于
+        // 这里的赋值才触发，必须用 ReferenceEquals 只清自己那一个，不能直接写 null
+        var w = new DesktopLyricsWindow();
+        w.Closed += (_, _) =>
+        {
+            if (ReferenceEquals(_lyricsWindow, w)) _lyricsWindow = null;
+        };
+        _lyricsWindow = w;
+        w.ShowWithoutActivation();
     }
 
     /// <summary>只关窗口，不改 DesktopLyricsEnabled——下次启动时会自动恢复。</summary>

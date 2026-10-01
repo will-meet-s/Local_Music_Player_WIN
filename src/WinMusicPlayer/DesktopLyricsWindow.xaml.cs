@@ -1,5 +1,7 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Text;
 using Microsoft.UI;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
@@ -49,6 +51,16 @@ public sealed partial class DesktopLyricsWindow : Window
     [DllImport("shcore.dll")]
     private static extern int GetDpiForMonitor(IntPtr hmonitor, uint dpiType, out uint dpiX, out uint dpiY);
 
+    // DEF-007 v2：枚举子窗口记日志，排查「锁定后解不了锁」——WinUI 的输入由子窗口
+    // DesktopChildSiteBridge 接收，这几个子窗口当时是什么扩展样式，光看顶层窗口看不出来
+    private delegate bool EnumChildProc(IntPtr hwnd, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern bool EnumChildWindows(IntPtr hwndParent, EnumChildProc lpEnumFunc, IntPtr lParam);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetClassNameW(IntPtr hwnd, StringBuilder lpClassName, int nMaxCount);
+
     private readonly Preferences _settings;
     private readonly IntPtr _hwnd;
 
@@ -92,9 +104,13 @@ public sealed partial class DesktopLyricsWindow : Window
     /// <summary>显示窗口，但不抢走当前窗口的焦点。</summary>
     public void ShowWithoutActivation() => AppWindow.Show(false);
 
-    /// <summary>托盘菜单用：穿透状态下窗口自己收不到点击，只能从外部解锁。</summary>
+    /// <summary>
+    /// 托盘菜单用：穿透状态下窗口自己收不到点击，只能从外部操作。
+    /// 只用于锁定——DEF-007 v2 以后，解锁一律走 App 的重建流程，不在这个窗口上改样式。
+    /// </summary>
     public void SetLocked(bool locked)
     {
+        Debug.Assert(locked);
         _settings.DesktopLyricsLocked = locked;
         _settings.Save();
         ApplyLock();
@@ -124,6 +140,18 @@ public sealed partial class DesktopLyricsWindow : Window
         var exStyle = (long)ClickThrough.GetWindowLongPtr(_hwnd, ClickThrough.GwlExStyle);
         CrashLog.WriteNote("DesktopLyrics",
             $"loaded locked={IsLocked} exstyle=0x{exStyle:X8} backdrop={TransparentBackdrop.LastApplySucceeded}");
+
+        // DEF-007 v2：枚举子窗口，记录每个子窗口的类名和扩展样式
+        EnumChildProc callback = (child, _) =>
+        {
+            var className = new StringBuilder(256);
+            GetClassNameW(child, className, className.Capacity);
+            var childExStyle = (long)ClickThrough.GetWindowLongPtr(child, ClickThrough.GwlExStyle);
+            CrashLog.WriteNote("DesktopLyrics", $"child class={className} exstyle=0x{childExStyle:X8}");
+            return true;
+        };
+        EnumChildWindows(_hwnd, callback, IntPtr.Zero);
+        GC.KeepAlive(callback);
     }
 
     private void OnClosed(object sender, WindowEventArgs args)
