@@ -63,6 +63,7 @@ public sealed partial class DesktopLyricsWindow : Window
         TextOutline.Attach(NextLine, NextShadowHost, 6f, 0.9f);
 
         SystemBackdrop = new TransparentBackdrop();
+        TransparentWindow.Enable(_hwnd);
 
         if (AppWindow.Presenter is OverlappedPresenter presenter)
         {

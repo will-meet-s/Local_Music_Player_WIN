@@ -44,7 +44,9 @@ internal static class WindowBackdrop
             window.SystemBackdrop = new ThinAcrylicBackdrop();
             // 设透明，不设 null：null 会让空白区域收不到鼠标点击
             root.Background = new SolidColorBrush(Colors.Transparent);
-            Diagnostics = $"build={build} acrylic=thin darkHr=0x{darkHr:X8}";
+            // inactive=keep：标记用的是自建的 SystemBackdropConfiguration（IsInputActive 恒为 true），
+            // 失焦也不会退化成纯色（DEF-006），和旧版 GetDefaultSystemBackdropConfiguration 的行为区分开
+            Diagnostics = $"build={build} acrylic=thin darkHr=0x{darkHr:X8} inactive=keep";
             return true;
         }
 

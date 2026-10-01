@@ -14,12 +14,18 @@ namespace WinMusicPlayer.Interop;
 internal sealed class ThinAcrylicBackdrop : SystemBackdrop
 {
     private DesktopAcrylicController? _controller;
+    private SystemBackdropConfiguration? _config;
 
     protected override void OnTargetConnected(ICompositionSupportsSystemBackdrop target, XamlRoot xamlRoot)
     {
         base.OnTargetConnected(target, xamlRoot);
         _controller = new DesktopAcrylicController { Kind = DesktopAcrylicKind.Thin };
-        _controller.SetSystemBackdropConfiguration(GetDefaultSystemBackdropConfiguration(target, xamlRoot));
+
+        // 不用系统默认的那份配置：它会跟着窗口激活状态走，失焦时 IsInputActive 变 false，
+        // 亚克力就退化成纯色（DEF-006）。这里自建配置，始终保持 IsInputActive = true，
+        // 让亚克力无论激活与否都保持半透明
+        _config = new SystemBackdropConfiguration { IsInputActive = true, Theme = SystemBackdropTheme.Dark };
+        _controller.SetSystemBackdropConfiguration(_config);
         _controller.AddSystemBackdropTarget(target);
     }
 
@@ -29,5 +35,6 @@ internal sealed class ThinAcrylicBackdrop : SystemBackdrop
         _controller?.RemoveSystemBackdropTarget(target);
         _controller?.Dispose();
         _controller = null;
+        _config = null;
     }
 }
