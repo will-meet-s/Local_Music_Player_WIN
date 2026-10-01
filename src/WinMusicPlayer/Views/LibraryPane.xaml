@@ -11,11 +11,11 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
+        <!-- T-017（CR-W1，W-1）：播放列表移到右侧抽屉，这里只留曲库｜歌单两个页签 -->
         <SelectorBar x:Name="PaneSelector" Grid.Row="0" Margin="10,8,10,0"
                      SelectionChanged="OnSelectorSelectionChanged">
             <SelectorBarItem Text="曲库" />
             <SelectorBarItem Text="歌单" />
-            <SelectorBarItem Text="播放列表" />
         </SelectorBar>
 
         <ContentControl x:Name="PaneContent" Grid.Row="1"

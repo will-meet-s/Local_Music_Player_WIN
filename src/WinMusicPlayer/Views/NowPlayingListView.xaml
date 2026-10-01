@@ -5,8 +5,10 @@
 
     <!-- 播放列表页（UI-1、UI-3，T-001+T-008 v5 §4.5、T-011）：顶部标题 + 存为歌单/清空按钮，
          列表用共用的行模板；当前播放那一行的图标/强调色由代码后置通过 ContainerContentChanging
-         覆盖（共用模板本身不知道"谁在播放"，见 Themes/TrackRowTemplate.xaml 的注释）。 -->
-    <Grid Background="{StaticResource SidebarBrush}">
+         覆盖（共用模板本身不知道"谁在播放"，见 Themes/TrackRowTemplate.xaml 的注释）。
+         T-017（CR-W1）：现在装在 NowPlayingDrawer 里，背景改成 Transparent，由抽屉统一提供，
+         否则会在抽屉的两层背景之上再叠一层 SidebarBrush。 -->
+    <Grid Background="Transparent">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />

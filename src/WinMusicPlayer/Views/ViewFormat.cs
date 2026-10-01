@@ -59,6 +59,17 @@ internal static class ViewFormat
     public static string? UnavailableTip(bool isAvailable, string path) =>
         isAvailable ? null : $"找不到文件：{path}";
 
+    // MARK: - T-017：播放列表抽屉（CR-W1）
+
+    /// <summary>控制条「播放列表」按钮的开关样式（T-017 v1 §2.3）：打开时强调色，关闭时普通文字色。</summary>
+    public static Brush DrawerButtonBrush(bool isOpen) => isOpen
+        ? ResourceBrush("AccentBrush", Windows.UI.Color.FromArgb(0xFF, 0x5C, 0xA8, 0xFF))
+        : ResourceBrush("TextBrush", Windows.UI.Color.FromArgb(0xFF, 0xF2, 0xF2, 0xF5));
+
+    public static Visibility VisibleIfOpen(bool isOpen) => isOpen ? Visibility.Visible : Visibility.Collapsed;
+
+    public static string DrawerButtonAutomationName(bool isOpen) => isOpen ? "播放列表，已打开" : "播放列表，已收起";
+
     /// <summary>
     /// 按资源键取画刷，查不到时写诊断日志并回退成用 <paramref name="fallback"/> 新建的纯色画刷，
     /// 而不是直接抛异常——查不到资源不该让歌词整块显示不出来（DEF-002）。

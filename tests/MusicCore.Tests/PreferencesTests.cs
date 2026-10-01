@@ -76,7 +76,8 @@ public class PreferencesTests
             DesktopLyricsWidth = 640,
             DesktopLyricsFontSize = 22,
             DesktopLyricsLocked = true,
-            DesktopLyricsColor = "#FFF9A8D4"
+            DesktopLyricsColor = "#FFF9A8D4",
+            NowPlayingDrawerOpen = true
         };
 
         var restored = Preferences.Parse(original.Serialize());
@@ -97,6 +98,17 @@ public class PreferencesTests
         Assert.Equal(original.DesktopLyricsFontSize, restored.DesktopLyricsFontSize, 6);
         Assert.Equal(original.DesktopLyricsLocked, restored.DesktopLyricsLocked);
         Assert.Equal(original.DesktopLyricsColor, restored.DesktopLyricsColor);
+        Assert.Equal(original.NowPlayingDrawerOpen, restored.NowPlayingDrawerOpen);
+    }
+
+    /// <summary>T-017（CR-W1）：旧的 settings.json 里没有 <c>NowPlayingDrawerOpen</c> 这个字段时，
+    /// 按 <c>bool</c> 默认值 false 处理，不需要迁移。</summary>
+    [Fact]
+    public void Parse_MissingDrawerOpenField_DefaultsToFalse()
+    {
+        var prefs = Preferences.Parse(BaselineJson);
+
+        Assert.False(prefs.NowPlayingDrawerOpen);
     }
 
     [Fact]

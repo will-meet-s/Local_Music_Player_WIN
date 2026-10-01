@@ -151,9 +151,11 @@
                 <!-- WinUI 没有 GridSplitter，T-001 先放一条固定分隔线 -->
                 <Border Grid.Column="1" Width="1" Background="{StaticResource SeparatorBrush}" />
 
-                <!-- T-005：歌词与正在播放 -->
+                <!-- T-005：歌词与正在播放；T-017（CR-W1）：播放列表抽屉叠在上层，声明顺序排在
+                     NowPlayingView 之后，Tab 顺序也在它之后（W-6） -->
                 <Grid x:Name="NowPlayingHost" Grid.Column="2">
                     <views:NowPlayingView />
+                    <views:NowPlayingDrawer />
                 </Grid>
             </Grid>
 

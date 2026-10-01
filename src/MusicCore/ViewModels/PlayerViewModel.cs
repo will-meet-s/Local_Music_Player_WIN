@@ -79,6 +79,7 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable, ISonglistsH
         _replayGainEnabled = _preferences.ReplayGainEnabled;
         _exclusiveOutputEnabled = _preferences.ExclusiveOutputEnabled;
         _desktopLyricsEnabled = _preferences.DesktopLyricsEnabled;
+        _isNowPlayingDrawerOpen = _preferences.NowPlayingDrawerOpen;
 
         NowPlaying = new NowPlayingList(_playMode);
         NowPlaying.Changed += () =>
@@ -109,6 +110,7 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable, ISonglistsH
         AppendCommand = new RelayCommand<IReadOnlyList<Track>>(AppendToNowPlaying);
         RemoveFromNowPlayingCommand = new RelayCommand<IReadOnlyList<int>>(RemoveFromNowPlaying);
         ClearNowPlayingCommand = new RelayCommand(ClearNowPlaying);
+        ToggleNowPlayingDrawerCommand = new RelayCommand(() => IsNowPlayingDrawerOpen = !IsNowPlayingDrawerOpen);
     }
 
     // MARK: - 曲库
@@ -451,6 +453,20 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable, ISonglistsH
     public bool ShowsLyrics => _nowPlayingLayout != NowPlayingLayout.ArtworkOnly;
     public string LayoutName => _nowPlayingLayout.DisplayName();
 
+    /// <summary>播放列表抽屉的开关状态（T-017 v1 §2.5，CR-W1）：只是界面状态，持久化到
+    /// <c>settings.json</c>，不影响播放和播放列表本身。</summary>
+    private bool _isNowPlayingDrawerOpen;
+    public bool IsNowPlayingDrawerOpen
+    {
+        get => _isNowPlayingDrawerOpen;
+        set
+        {
+            if (!Set(ref _isNowPlayingDrawerOpen, value)) return;
+            _preferences.NowPlayingDrawerOpen = value;
+            _preferences.Save();
+        }
+    }
+
     private double _backgroundOpacity;
     public double BackgroundOpacity
     {
@@ -549,6 +565,7 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable, ISonglistsH
     public RelayCommand<IReadOnlyList<Track>> AppendCommand { get; }
     public RelayCommand<IReadOnlyList<int>> RemoveFromNowPlayingCommand { get; }
     public RelayCommand ClearNowPlayingCommand { get; }
+    public RelayCommand ToggleNowPlayingDrawerCommand { get; }
 
     // MARK: - 曲库扫描
 

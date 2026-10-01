@@ -56,6 +56,10 @@ public sealed class Preferences
     public bool DesktopLyricsLocked { get; set; }
     public string DesktopLyricsColor { get; set; } = "#FF7DD3FC";
 
+    /// <summary>播放列表抽屉的开关状态（T-017，CR-W1）。旧文件里没有这个字段时按 false 处理
+    /// （<c>bool</c> 默认值），不需要迁移。</summary>
+    public bool NowPlayingDrawerOpen { get; set; }
+
     [JsonIgnore]
     public static string FilePath { get; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
