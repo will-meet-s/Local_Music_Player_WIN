@@ -62,7 +62,9 @@
 
             <StackPanel Grid.Column="2" Orientation="Horizontal"
                         HorizontalAlignment="Right" VerticalAlignment="Center">
-                <!-- T-017（CR-W1）：播放列表抽屉开关。下方短线指示开关状态（§2.3） -->
+                <!-- T-017（CR-W1）：播放列表抽屉开关。下方短线指示开关状态（§2.3）。
+                     短线一直占着位置，只改 Opacity（评审 M-2）：改 Visibility 的话，Collapsed
+                     会让这个 StackPanel 矮 4 px，按钮垂直居中，于是每次开关按钮都会跟着跳一下 -->
                 <StackPanel Orientation="Vertical" HorizontalAlignment="Center" Margin="0,0,10,0">
                     <Button Style="{StaticResource IconButton}"
                             Content="&#xE8FD;"
@@ -73,7 +75,7 @@
                     <Rectangle Width="16" Height="2" RadiusX="1" RadiusY="1"
                                HorizontalAlignment="Center" Margin="0,2,0,0"
                                Fill="{StaticResource AccentBrush}"
-                               Visibility="{x:Bind views:ViewFormat.VisibleIfOpen(ViewModel.IsNowPlayingDrawerOpen), Mode=OneWay}" />
+                               Opacity="{x:Bind views:ViewFormat.VisibleIfOpen(ViewModel.IsNowPlayingDrawerOpen), Mode=OneWay}" />
                 </StackPanel>
 
                 <TextBlock FontFamily="{StaticResource IconFont}" FontSize="13"

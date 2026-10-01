@@ -2,7 +2,6 @@ using Microsoft.UI.Composition;
 using Microsoft.UI.Composition.SystemBackdrops;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media;
-using Windows.UI;
 
 namespace WinMusicPlayer.Interop;
 
@@ -17,16 +16,13 @@ internal sealed class ThinAcrylicBackdrop : SystemBackdrop
     private DesktopAcrylicController? _controller;
     private SystemBackdropConfiguration? _config;
 
-    /// <summary>系统关闭「透明效果」或省电模式时，亚克力退化成的纯色（T-017 v1 §2.4，W-2）。
-    /// 播放列表抽屉的 <c>BlurLayer</c>（窗口内的 <see cref="AcrylicBrush"/>）要用同一个颜色兜底，
-    /// 不然退化之后窗口和抽屉会是两种不一样的纯色。</summary>
-    internal static Color FallbackColor { get; private set; }
-
     protected override void OnTargetConnected(ICompositionSupportsSystemBackdrop target, XamlRoot xamlRoot)
     {
         base.OnTargetConnected(target, xamlRoot);
         _controller = new DesktopAcrylicController { Kind = DesktopAcrylicKind.Thin };
-        FallbackColor = _controller.FallbackColor;
+        // 把系统关闭「透明效果」或省电模式时的退化色固定成 BackdropColors.Fallback（T-017 评审
+        // M-1）：播放列表抽屉的 BlurLayer 用同一个常量兜底，两边退化后颜色才能保证一致（W-2）
+        _controller.FallbackColor = BackdropColors.Fallback;
 
         // 不用系统默认的那份配置：它会跟着窗口激活状态走，失焦时 IsInputActive 变 false，
         // 亚克力就退化成纯色（DEF-006）。这里自建配置，始终保持 IsInputActive = true，

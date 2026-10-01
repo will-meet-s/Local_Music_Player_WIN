@@ -22,11 +22,6 @@ public sealed partial class NowPlayingDrawer : UserControl
 {
     private const double DrawerWidth = 340;
 
-    /// <summary>和 <see cref="WinMusicPlayer.Interop.WindowBackdrop"/> 纯色兜底路径相同的颜色常量
-    /// （方案 §2.4 第 3 行）：<see cref="ThinAcrylicBackdrop.FallbackColor"/> 还没被赋值
-    /// （<c>default(Color)</c>）时用它，保证退化后窗口和抽屉颜色一致。</summary>
-    private static readonly Color FallbackColorConstant = Color.FromArgb(0xFF, 0x1E, 0x1E, 0x22);
-
     private readonly UISettings _uiSettings = new();
     private NowPlayingListView? _listView;
     private Storyboard? _storyboard;
@@ -35,15 +30,15 @@ public sealed partial class NowPlayingDrawer : UserControl
     {
         InitializeComponent();
 
-        var fallback = ThinAcrylicBackdrop.FallbackColor;
-        if (fallback == default) fallback = FallbackColorConstant;
-
+        // 退化色用固定常量，不读 DesktopAcrylicController.FallbackColor（T-017 评审 M-1）：
+        // MainWindow 的 InitializeComponent() 先构造这个控件，WindowBackdrop.Apply 后执行，
+        // 这里读到的永远是时序上还没赋值的默认颜色，不是系统真正用的那个退化色
         BlurLayer.Fill = new AcrylicBrush
         {
             TintColor = Color.FromArgb(0xFF, 0x1A, 0x1A, 0x1E),
             TintOpacity = 0,
             TintLuminosityOpacity = 0,
-            FallbackColor = fallback
+            FallbackColor = BackdropColors.Fallback
         };
 
         ViewModel.PropertyChanged += OnViewModelPropertyChanged;

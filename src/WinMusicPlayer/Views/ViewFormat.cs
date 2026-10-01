@@ -66,7 +66,10 @@ internal static class ViewFormat
         ? ResourceBrush("AccentBrush", Windows.UI.Color.FromArgb(0xFF, 0x5C, 0xA8, 0xFF))
         : ResourceBrush("TextBrush", Windows.UI.Color.FromArgb(0xFF, 0xF2, 0xF2, 0xF5));
 
-    public static Visibility VisibleIfOpen(bool isOpen) => isOpen ? Visibility.Visible : Visibility.Collapsed;
+    /// <summary>短线指示器用 Opacity 而不是 Visibility（T-017 评审 M-2）：Collapsed 会让它所在的
+    /// StackPanel 矮 4 px，按钮垂直居中，于是每次开关抽屉按钮就会跟着跳一下；一直占着位置、
+    /// 只改透明度就不会跳动。</summary>
+    public static double VisibleIfOpen(bool isOpen) => isOpen ? 1.0 : 0.0;
 
     public static string DrawerButtonAutomationName(bool isOpen) => isOpen ? "播放列表，已打开" : "播放列表，已收起";
 

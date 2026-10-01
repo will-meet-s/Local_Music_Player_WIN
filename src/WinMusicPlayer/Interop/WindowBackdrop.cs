@@ -4,7 +4,6 @@ using Microsoft.UI.Composition.SystemBackdrops;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
-using Windows.UI;
 using WinRT.Interop;
 
 namespace WinMusicPlayer.Interop;
@@ -50,8 +49,9 @@ internal static class WindowBackdrop
             return true;
         }
 
-        // 老系统：不透明的纯色底。BackdropLayer 叠在它上面，调不透明度时只有颜色深浅变化，和基线一致
-        root.Background = new SolidColorBrush(ColorHelper.FromArgb(0xFF, 0x1E, 0x1E, 0x22));
+        // 老系统：不透明的纯色底。BackdropLayer 叠在它上面，调不透明度时只有颜色深浅变化，和基线一致。
+        // 和 ThinAcrylicBackdrop、NowPlayingDrawer 共用同一个退化色常量（T-017 评审 M-1）
+        root.Background = new SolidColorBrush(BackdropColors.Fallback);
         Diagnostics = $"build={build} acrylic=off darkHr=0x{darkHr:X8}";
         return false;
     }
