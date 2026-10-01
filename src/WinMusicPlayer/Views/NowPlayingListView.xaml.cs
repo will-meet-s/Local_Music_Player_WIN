@@ -102,14 +102,22 @@ public sealed partial class NowPlayingListView : UserControl
 
     private void OnTrackListKeyDown(object sender, KeyRoutedEventArgs e)
     {
-        if (e.Key == VirtualKey.Delete)
-        {
-            var indices = SelectionOrder.IndicesByListOrder(TrackList);
-            if (indices.Count > 0) ViewModel.RemoveFromNowPlayingCommand.Execute(indices);
-            e.Handled = true;
-            return;
-        }
+        if (e.Key != VirtualKey.Delete) return;
 
+        var indices = SelectionOrder.IndicesByListOrder(TrackList);
+        if (indices.Count > 0) ViewModel.RemoveFromNowPlayingCommand.Execute(indices);
+        e.Handled = true;
+    }
+
+    /// <summary>
+    /// Alt+↑/↓ 挂在 <c>PreviewKeyDown</c> 上，不是 <c>KeyDown</c>（UI-3 复审 M-2）：
+    /// <see cref="ListView"/> 自己会先处理方向键（移动选中项并标记为已处理），挂在
+    /// <c>KeyDown</c> 上要么收不到，要么收到时选中项已经变了，<c>from</c> 就取错了。
+    /// <c>PreviewKeyDown</c> 在 <see cref="ListView"/> 自己处理之前触发。
+    /// </summary>
+    private void OnTrackListPreviewKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key != VirtualKey.Up && e.Key != VirtualKey.Down) return;
         if (TrackList.SelectedItems.Count != 1) return; // 多选时不响应
 
         var isAltDown = InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Menu)
@@ -117,16 +125,16 @@ public sealed partial class NowPlayingListView : UserControl
         if (!isAltDown) return;
 
         var from = TrackList.SelectedIndex;
-        if (e.Key == VirtualKey.Up && from > 0)
-        {
-            ViewModel.MoveInNowPlaying(from, from - 1);
-            e.Handled = true;
-        }
-        else if (e.Key == VirtualKey.Down && from < ViewModel.NowPlaying.Items.Count - 1)
-        {
-            ViewModel.MoveInNowPlaying(from, from + 1);
-            e.Handled = true;
-        }
+        int to;
+        if (e.Key == VirtualKey.Up && from > 0) to = from - 1;
+        else if (e.Key == VirtualKey.Down && from < ViewModel.NowPlaying.Items.Count - 1) to = from + 1;
+        else return;
+
+        ViewModel.MoveInNowPlaying(from, to);
+        // 挪动之后重新选中被挪动的那一首（UI-3 复审 M-3），不然连续按两次 Alt+↑/↓ 时
+        // 第二次会因为 SelectedItems.Count != 1（选中丢失）而不响应
+        TrackList.SelectedIndex = to;
+        e.Handled = true;
     }
 
     // MARK: - 拖动排序（T-008 §4.5）
@@ -154,6 +162,7 @@ public sealed partial class NowPlayingListView : UserControl
         if (toIndex == from) return;
 
         ViewModel.MoveInNowPlaying(from, toIndex);
+        TrackList.SelectedIndex = toIndex; // 挪动之后重新选中被拖动的那一首（UI-3 复审 M-3）
     }
 
     // MARK: - 当前行视觉（播放图标 + 强调色文字）

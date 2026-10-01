@@ -105,6 +105,7 @@
                       DoubleTapped="OnTrackListDoubleTapped"
                       RightTapped="OnTrackListRightTapped"
                       KeyDown="OnTrackListKeyDown"
+                      PreviewKeyDown="OnTrackListPreviewKeyDown"
                       CanDragItems="{x:Bind views:ViewFormat.Not(SonglistsVm.Opened.IsFiltering), Mode=OneWay}"
                       AllowDrop="True"
                       CanReorderItems="False"

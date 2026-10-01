@@ -65,6 +65,7 @@
                       ContainerContentChanging="OnContainerContentChanging"
                       RightTapped="OnTrackListRightTapped"
                       KeyDown="OnTrackListKeyDown"
+                      PreviewKeyDown="OnTrackListPreviewKeyDown"
                       CanDragItems="True"
                       AllowDrop="True"
                       CanReorderItems="False"

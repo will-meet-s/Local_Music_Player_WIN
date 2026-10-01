@@ -23,7 +23,7 @@ internal static class SelectionOrder
     /// 上半部分就插到它前面，下半部分就插到它后面；落点不在任何一行范围内（拖到空白处）时，
     /// 放到最后。
     /// </summary>
-    public static int ComputeDropIndexAfterRemoval(ListView list, Point position, int fromIndex, int countAfterRemoval)
+    public static int ComputeDropIndexAfterRemoval(ListView list, Point position, int fromIndex, int count)
     {
         if (list.ItemsPanelRoot is Panel panel)
         {
@@ -38,10 +38,10 @@ internal static class SelectionOrder
                 var insertAt = isLowerHalf ? rawIndex + 1 : rawIndex;
 
                 // insertAt 是"拖动前"的列表位置；移除 fromIndex 那一项之后，它后面的位置都要往前挪一格
-                return Math.Clamp(insertAt > fromIndex ? insertAt - 1 : insertAt, 0, countAfterRemoval - 1);
+                return Math.Clamp(insertAt > fromIndex ? insertAt - 1 : insertAt, 0, count - 1);
             }
         }
 
-        return countAfterRemoval - 1;
+        return count - 1;
     }
 }

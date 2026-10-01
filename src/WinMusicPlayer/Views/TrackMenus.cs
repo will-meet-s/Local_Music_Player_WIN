@@ -26,7 +26,10 @@ internal static class TrackMenus
         menu.Items.Add(CreateItem("下一首播放", () => player.PlayNextCommand.Execute(getSelectedTracks())));
         menu.Items.Add(CreateItem("添加到播放列表末尾", () => player.AppendCommand.Execute(getSelectedTracks())));
         menu.Items.Add(new MenuFlyoutSeparator());
-        menu.Items.Add(BuildAddToSonglistSubItem(xamlRoot, songlistsVm, getSelectedTracks, getTargets));
+        var subItem = new MenuFlyoutSubItem { Text = "添加到歌单" };
+        menu.Items.Add(subItem);
+
+        AttachAddToSonglistPopulation(menu, subItem, xamlRoot, songlistsVm, getSelectedTracks, getTargets);
 
         return menu;
     }
@@ -44,7 +47,10 @@ internal static class TrackMenus
         menu.Items.Add(CreateItem("移到末尾", () => player.AppendCommand.Execute(getSelectedTracks())));
         menu.Items.Add(CreateItem("从播放列表移除", () => player.RemoveFromNowPlayingCommand.Execute(getSelectedIndices())));
         menu.Items.Add(new MenuFlyoutSeparator());
-        menu.Items.Add(BuildAddToSonglistSubItem(xamlRoot, songlistsVm, getSelectedTracks, () => songlistsVm.Items.ToList()));
+        var subItem = new MenuFlyoutSubItem { Text = "添加到歌单" };
+        menu.Items.Add(subItem);
+
+        AttachAddToSonglistPopulation(menu, subItem, xamlRoot, songlistsVm, getSelectedTracks, () => songlistsVm.Items.ToList());
 
         return menu;
     }
@@ -77,17 +83,18 @@ internal static class TrackMenus
         return item;
     }
 
-    private static MenuFlyoutSubItem BuildAddToSonglistSubItem(
-        XamlRoot xamlRoot, SonglistsViewModel songlistsVm,
+    /// <summary>
+    /// 「添加到歌单▸」子菜单的内容挂在<b>上层 <see cref="MenuFlyout"/> 的 <c>Opening</c></b> 上
+    /// 生成，不是 <paramref name="subItem"/> 自己的——<see cref="MenuFlyoutSubItem"/> 在 WinUI 3
+    /// 里没有 <c>Opening</c> 事件（UI-3 复审 M-1，编译错误）。挂在上层菜单的 <c>Opening</c> 上
+    /// 仍然是「菜单打开时才生成」，没有提前生成，同样满足 T-004 §2.4。
+    /// </summary>
+    private static void AttachAddToSonglistPopulation(
+        MenuFlyout menu, MenuFlyoutSubItem subItem, XamlRoot xamlRoot, SonglistsViewModel songlistsVm,
         Func<IReadOnlyList<Track>> getSelectedTracks, Func<IReadOnlyList<SonglistSummary>> getTargets)
     {
-        var subItem = new MenuFlyoutSubItem { Text = "添加到歌单" };
-
-        // 打开时才生成子项，不提前生成（T-004 §2.4：200 个歌单时依赖系统菜单滚动）
-        subItem.Opening += (sender, _) =>
-            PopulateSonglistItems(((MenuFlyoutSubItem)sender!).Items, xamlRoot, songlistsVm, getSelectedTracks, getTargets());
-
-        return subItem;
+        menu.Opening += (_, _) =>
+            PopulateSonglistItems(subItem.Items, xamlRoot, songlistsVm, getSelectedTracks, getTargets());
     }
 
     private static void PopulateSonglistItems(

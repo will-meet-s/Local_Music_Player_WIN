@@ -107,13 +107,21 @@ public sealed partial class SonglistDetailView : UserControl
 
     private void OnTrackListKeyDown(object sender, KeyRoutedEventArgs e)
     {
-        if (e.Key == VirtualKey.Delete)
-        {
-            RemoveSelectedFromSonglist();
-            e.Handled = true;
-            return;
-        }
+        if (e.Key != VirtualKey.Delete) return;
 
+        RemoveSelectedFromSonglist();
+        e.Handled = true;
+    }
+
+    /// <summary>
+    /// Alt+↑/↓ 挂在 <c>PreviewKeyDown</c> 上，不是 <c>KeyDown</c>（UI-3 复审 M-2）：
+    /// <see cref="ListView"/> 自己会先处理方向键（移动选中项并标记为已处理），挂在
+    /// <c>KeyDown</c> 上要么收不到，要么收到时选中项已经变了，<c>from</c> 就取错了。
+    /// <c>PreviewKeyDown</c> 在 <see cref="ListView"/> 自己处理之前触发。
+    /// </summary>
+    private void OnTrackListPreviewKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key != VirtualKey.Up && e.Key != VirtualKey.Down) return;
         if (SonglistsVm.Opened is not { IsFiltering: false } opened) return; // 搜索中不响应 Alt+↑/↓
         if (TrackList.SelectedItems.Count != 1) return; // 多选时不响应
 
@@ -122,16 +130,13 @@ public sealed partial class SonglistDetailView : UserControl
         if (!isAltDown) return;
 
         var from = TrackList.SelectedIndex;
-        if (e.Key == VirtualKey.Up && from > 0)
-        {
-            Observe(SonglistsVm.MoveInOpenedAsync(opened.Displayed[from], from - 1));
-            e.Handled = true;
-        }
-        else if (e.Key == VirtualKey.Down && from < opened.Displayed.Count - 1)
-        {
-            Observe(SonglistsVm.MoveInOpenedAsync(opened.Displayed[from], from + 1));
-            e.Handled = true;
-        }
+        int to;
+        if (e.Key == VirtualKey.Up && from > 0) to = from - 1;
+        else if (e.Key == VirtualKey.Down && from < opened.Displayed.Count - 1) to = from + 1;
+        else return;
+
+        MoveThenReselect(opened.Displayed[from], to);
+        e.Handled = true;
     }
 
     // MARK: - 拖动排序（T-005 §2）
@@ -157,7 +162,28 @@ public sealed partial class SonglistDetailView : UserControl
         var toIndex = SelectionOrder.ComputeDropIndexAfterRemoval(TrackList, e.GetPosition(TrackList), from, opened.Displayed.Count);
         if (toIndex == from) return;
 
-        Observe(SonglistsVm.MoveInOpenedAsync(dragged, toIndex));
+        MoveThenReselect(dragged, toIndex);
+    }
+
+    /// <summary>
+    /// 挪动之后重新选中被挪动的那一首（UI-3 复审 M-3）：歌单详情页靠 <c>Changed</c> →
+    /// <c>ReplaceAll</c> 整体替换 <see cref="SonglistDetailViewModel.Displayed"/> 来刷新，选中会丢失，
+    /// 不重新选中的话，连续两次 Alt+↑/↓ 第二次会因为 <c>SelectedItems.Count != 1</c> 不响应。
+    /// <paramref name="track"/> 是挪动前就捕获好的对象引用，<c>Displayed</c> 重建后仍然是同一个
+    /// <see cref="Track"/> 实例（<see cref="MusicCore.Library.TrackCatalog"/> 保证），能找到。
+    /// </summary>
+    private async void MoveThenReselect(Track track, int toIndex)
+    {
+        try
+        {
+            await SonglistsVm.MoveInOpenedAsync(track, toIndex);
+            TrackList.SelectedItem = track;
+            TrackList.ScrollIntoView(track);
+        }
+        catch (Exception e)
+        {
+            CrashLog.Write("SonglistDetailView", e);
+        }
     }
 
     /// <summary>命令触发、不等待的 Task，异常写进 CrashLog，不能被默默吞掉
