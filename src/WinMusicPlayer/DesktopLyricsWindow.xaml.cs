@@ -61,8 +61,24 @@ public sealed partial class DesktopLyricsWindow : Window
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern int GetClassNameW(IntPtr hwnd, StringBuilder lpClassName, int nMaxCount);
 
+    // DEF-007 v3：悬停状态机，物理像素——GetCursorPos/GetWindowRect 在 per-monitor v2 下都是物理像素
+    private const int HoverShowMs = 500;
+    private const int HoverHideMs = 1000;
+    private const int UnlockButtonInflatePx = 4;
+
+    [DllImport("user32.dll")]
+    private static extern bool GetCursorPos(out POINT point);
+
+    [DllImport("user32.dll")]
+    private static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
+
     private readonly Preferences _settings;
     private readonly IntPtr _hwnd;
+
+    private UnlockButtonWindow? _unlockButton;
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _hoverTimer;
+    private long? _hoverSince;
+    private long? _leaveSince;
 
     public DesktopLyricsWindow()
     {
@@ -157,6 +173,8 @@ public sealed partial class DesktopLyricsWindow : Window
     private void OnClosed(object sender, WindowEventArgs args)
     {
         ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
+        _hoverTimer?.Stop();
+        _unlockButton?.Dispose();
         PersistGeometry();
     }
 
@@ -347,11 +365,116 @@ public sealed partial class DesktopLyricsWindow : Window
         var locked = _settings.DesktopLyricsLocked;
         ClickThrough.SetEnabled(_hwnd, locked);
 
-        // 锁定时把工具条藏死；解锁靠托盘菜单，因为穿透后这里点不到
+        // 锁定时把工具条藏死；解锁靠悬停出现的小按钮（DEF-007 v3），因为穿透后这里点不到
         LockButton.Content = locked ? "\uE72E" : "\uE785";
         if (locked) Toolbar.Visibility = Visibility.Collapsed;
         FitHeight();
+
+        if (locked) StartHoverTimer();
+        else StopHoverTimer();
     }
+
+    // MARK: - 悬停解锁按钮（DEF-007 v3）
+
+    private void StartHoverTimer()
+    {
+        if (_hoverTimer is null)
+        {
+            _hoverTimer = DispatcherQueue.CreateTimer();
+            _hoverTimer.Interval = TimeSpan.FromMilliseconds(100);
+            _hoverTimer.Tick += OnHoverTimerTick;
+        }
+        _hoverTimer.Start();
+    }
+
+    private void StopHoverTimer()
+    {
+        _hoverTimer?.Stop();
+        _hoverSince = null;
+        _leaveSince = null;
+        _unlockButton?.Hide();
+    }
+
+    private void OnHoverTimerTick(Microsoft.UI.Dispatching.DispatcherQueueTimer sender, object args)
+    {
+        GetCursorPos(out var pt);
+        GetWindowRect(_hwnd, out var lyr);
+
+        var dpi = GetDpiForWindow(_hwnd);
+        var size = (int)Math.Round(32 * dpi / 96.0);
+
+        var windowId = Win32Interop.GetWindowIdFromWindow(_hwnd);
+        var display = DisplayArea.GetFromWindowId(windowId, DisplayAreaFallback.Primary);
+        var workArea = display.WorkArea;
+
+        // 按钮放在浮层上边沿之外、水平居中；如果上方放不下，就放在浮层顶部的里面
+        var bx = lyr.Left + (lyr.Width - size) / 2;
+        var by = lyr.Top - size >= workArea.Y ? lyr.Top - size : lyr.Top;
+
+        var inLyrics = Contains(lyr, pt);
+        var buttonVisible = _unlockButton?.IsVisible ?? false;
+        // 按钮和浮层边对边相接，再各向外扩 4 px，光标从浮层移到按钮的途中不会算作离开（F-3）
+        var inButton = buttonVisible && Contains(Inflate(_unlockButton!.Bounds, UnlockButtonInflatePx), pt);
+
+        if (!buttonVisible)
+        {
+            if (inLyrics)
+            {
+                _hoverSince ??= Environment.TickCount64;
+                if (Environment.TickCount64 - _hoverSince >= HoverShowMs)
+                {
+                    ShowUnlockButton(bx, by, size, dpi);
+                }
+            }
+            else
+            {
+                _hoverSince = null;
+            }
+        }
+        else
+        {
+            if (inLyrics || inButton)
+            {
+                _leaveSince = null;
+                _unlockButton!.ShowAt(bx, by, size);   // 跟随浮层的高度变化（FitHeight）
+            }
+            else
+            {
+                _leaveSince ??= Environment.TickCount64;
+                if (Environment.TickCount64 - _leaveSince >= HoverHideMs)
+                {
+                    _unlockButton!.Hide();
+                    _hoverSince = null;
+                    CrashLog.WriteNote("DesktopLyrics", "hover hide");
+                }
+            }
+        }
+    }
+
+    private void ShowUnlockButton(int x, int y, int size, uint dpi)
+    {
+        if (_unlockButton is null)
+        {
+            var button = new UnlockButtonWindow(_hwnd, () => ((App)Application.Current).SetLyricsLocked(false));
+            if (!button.IsValid)
+            {
+                // 自动兜底：按钮创建失败，宁可解锁也不让用户被锁死
+                CrashLog.WriteNote("DesktopLyrics", $"unlockButton create failed err={button.LastError}");
+                ((App)Application.Current).SetLyricsLocked(false);
+                return;
+            }
+            _unlockButton = button;
+        }
+
+        _unlockButton.ShowAt(x, y, size);
+        CrashLog.WriteNote("DesktopLyrics", $"hover show x={x} y={y} size={size} dpi={dpi}");
+    }
+
+    private static bool Contains(RECT r, POINT p) =>
+        p.X >= r.Left && p.X < r.Right && p.Y >= r.Top && p.Y < r.Bottom;
+
+    private static RECT Inflate(RECT r, int by) =>
+        new() { Left = r.Left - by, Top = r.Top - by, Right = r.Right + by, Bottom = r.Bottom + by };
 
     private void AdjustFont(double delta)
     {
@@ -398,12 +521,9 @@ public sealed partial class DesktopLyricsWindow : Window
         PersistGeometry();
     }
 
-    private void OnToggleLock(object sender, RoutedEventArgs e)
-    {
-        _settings.DesktopLyricsLocked = !_settings.DesktopLyricsLocked;
-        _settings.Save();
-        ApplyLock();
-    }
+    /// <summary>工具条只在未锁定时可见，所以这里只会执行「锁定」——解锁统一走 App.SetLyricsLocked。</summary>
+    private void OnToggleLock(object sender, RoutedEventArgs e) =>
+        ((App)Application.Current).SetLyricsLocked(true);
 
     private void OnFontLarger(object sender, RoutedEventArgs e) => AdjustFont(2);
 
