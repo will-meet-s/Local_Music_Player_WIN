@@ -35,6 +35,11 @@ public sealed class SonglistDetailViewModel : ObservableObject, IDisposable
     /// <summary>过滤后的结果，保持歌单里的顺序（T-012 方案 §1：不排序）。</summary>
     public ObservableCollection<Track> Displayed => _displayed;
 
+    /// <summary>未经搜索过滤的完整列表（界面接入方案 v1 §2.3）：打开歌单、扫描完成后，
+    /// <c>SonglistsViewModel</c> 用它交给 <see cref="AvailabilityChecker"/> 检查，覆盖范围要是
+    /// 整个歌单，不受当前搜索词影响。</summary>
+    public IReadOnlyList<Track> AllTracks => _allTracks;
+
     public string Name
     {
         get => _name;

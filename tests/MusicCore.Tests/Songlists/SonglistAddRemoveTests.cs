@@ -292,4 +292,37 @@ public sealed class SonglistNoticesTests
     {
         Assert.Equal(expected, SonglistNotices.ForSaveFailed(reason));
     }
+
+    // ForError：界面接入方案 v1 §2.5 的 5 个分支，文字要和表里一字不差
+
+    [Fact]
+    public void ForError_NameEmpty_ReturnsFixedText()
+    {
+        Assert.Equal("歌单名称不能为空", SonglistNotices.ForError(SonglistErrorCode.NameEmpty, null, "随便"));
+    }
+
+    [Fact]
+    public void ForError_NameTooLong_ReturnsFixedText()
+    {
+        Assert.Equal("歌单名称不能超过 100 个字符", SonglistNotices.ForError(SonglistErrorCode.NameTooLong, null, "随便"));
+    }
+
+    [Fact]
+    public void ForError_NameDuplicate_IncludesExistingName()
+    {
+        Assert.Equal("已有同名歌单「通勤」", SonglistNotices.ForError(SonglistErrorCode.NameDuplicate, null, "通勤"));
+    }
+
+    [Fact]
+    public void ForError_NotFound_IncludesOriginalName()
+    {
+        Assert.Equal("歌单「通勤」已不存在", SonglistNotices.ForError(SonglistErrorCode.NotFound, null, "通勤"));
+    }
+
+    [Fact]
+    public void ForError_SaveFailed_DelegatesToForSaveFailed()
+    {
+        var expected = SonglistNotices.ForSaveFailed(SaveFailureReason.Busy);
+        Assert.Equal(expected, SonglistNotices.ForError(SonglistErrorCode.SaveFailed, SaveFailureReason.Busy, "通勤"));
+    }
 }

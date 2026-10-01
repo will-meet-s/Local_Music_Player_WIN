@@ -1,0 +1,114 @@
+<UserControl
+    x:Class="WinMusicPlayer.Views.SonglistDetailView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:views="using:WinMusicPlayer.Views">
+
+    <!-- 歌单详情页（UI-2，T-003 v7 §2.5、T-006 v1 §2.3、T-012 v1）：每次打开都是一个新实例，
+         绑定的 SonglistsVm.Opened 在构造时已经不是 null（由 SonglistsHost 保证），
+         所以搜索词天然是空的，不需要额外清空逻辑（T-012：重新进入详情页清空搜索）。 -->
+    <Grid Background="{StaticResource SidebarBrush}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- 返回、标题、首数 -->
+        <Grid Grid.Row="0" Margin="10,8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <Button Grid.Column="0" Style="{StaticResource IconButton}"
+                    Content="&#xE72B;" VerticalAlignment="Top"
+                    Click="OnBackClick" ToolTipService.ToolTip="返回" />
+
+            <StackPanel Grid.Column="1" Margin="6,0,0,0">
+                <TextBlock Text="{x:Bind SonglistsVm.Opened.Name, Mode=OneWay}"
+                           TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis"
+                           ToolTipService.ToolTip="{x:Bind SonglistsVm.Opened.Name, Mode=OneWay}" />
+                <TextBlock Text="{x:Bind views:ViewFormat.SonglistCount(SonglistsVm.Opened.Displayed.Count), Mode=OneWay}"
+                           FontSize="11" Foreground="{StaticResource SecondaryTextBrush}" />
+            </StackPanel>
+        </Grid>
+
+        <!-- 搜索框（T-012，样式同曲库） + 播放全部（T-006） -->
+        <StackPanel Grid.Row="1" Margin="10,0,10,8">
+            <Border Background="{StaticResource ControlFillBrush}" CornerRadius="6" Padding="8,5">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock Grid.Column="0" FontFamily="{StaticResource IconFont}" Text="&#xE721;"
+                               Foreground="{StaticResource SecondaryTextBrush}" VerticalAlignment="Center" />
+
+                    <TextBox x:Name="SearchBox" Grid.Column="1" Margin="6,0"
+                             PlaceholderText="搜索歌曲、歌手、专辑"
+                             Background="Transparent" BorderThickness="0"
+                             TextChanged="OnSearchBoxTextChanged">
+                        <TextBox.Resources>
+                            <SolidColorBrush x:Key="TextControlBackground" Color="Transparent" />
+                            <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="Transparent" />
+                            <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="Transparent" />
+                            <SolidColorBrush x:Key="TextControlBorderBrush" Color="Transparent" />
+                            <SolidColorBrush x:Key="TextControlBorderBrushPointerOver" Color="Transparent" />
+                            <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="Transparent" />
+                            <StaticResource x:Key="TextControlPlaceholderForeground" ResourceKey="SecondaryTextBrush" />
+                            <StaticResource x:Key="TextControlPlaceholderForegroundPointerOver" ResourceKey="SecondaryTextBrush" />
+                            <StaticResource x:Key="TextControlPlaceholderForegroundFocused" ResourceKey="SecondaryTextBrush" />
+                        </TextBox.Resources>
+                    </TextBox>
+
+                    <Button Grid.Column="2" Style="{StaticResource IconButton}"
+                            FontSize="12" Padding="2"
+                            Content="&#xE711;" Click="OnClearSearchClick"
+                            Visibility="{x:Bind SonglistsVm.Opened.IsFiltering, Mode=OneWay}"
+                            ToolTipService.ToolTip="清除搜索" />
+                </Grid>
+            </Border>
+
+            <Button Margin="0,8,0,0" HorizontalAlignment="Stretch"
+                    Style="{StaticResource IconButton}"
+                    Click="OnPlayAllClick"
+                    IsEnabled="{x:Bind SonglistsVm.Opened.CanPlayAll, Mode=OneWay}">
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                    <TextBlock FontFamily="{StaticResource IconFont}" Text="&#xE768;"
+                               FontSize="13" VerticalAlignment="Center" />
+                    <TextBlock Text="播放全部" Margin="6,0,0,0"
+                               FontFamily="{StaticResource UiFont}" FontSize="13"
+                               VerticalAlignment="Center" />
+                </StackPanel>
+            </Button>
+        </StackPanel>
+
+        <Border Grid.Row="2" Height="1" Background="{StaticResource SeparatorBrush}" />
+
+        <Grid Grid.Row="3">
+            <ListView x:Name="TrackList"
+                      SelectionMode="Single"
+                      Background="Transparent"
+                      ItemsSource="{x:Bind SonglistsVm.Opened.Displayed, Mode=OneWay}"
+                      ItemTemplate="{StaticResource TrackRowTemplate}"
+                      DoubleTapped="OnTrackListDoubleTapped" />
+
+            <!-- 空态：歌单本身为空，或者搜索没有结果（文字由 SonglistDetailViewModel.EmptyMessage 区分） -->
+            <StackPanel x:Name="EmptyState"
+                        HorizontalAlignment="Center" VerticalAlignment="Center"
+                        Visibility="Collapsed">
+                <TextBlock FontFamily="{StaticResource IconFont}" Text="&#xE8D6;"
+                           FontSize="36" Foreground="{StaticResource TertiaryTextBrush}"
+                           HorizontalAlignment="Center" />
+                <TextBlock Text="{x:Bind SonglistsVm.Opened.EmptyMessage, Mode=OneWay}"
+                           Foreground="{StaticResource SecondaryTextBrush}"
+                           TextWrapping="Wrap" TextAlignment="Center"
+                           MaxWidth="220" Margin="0,8,0,0" />
+            </StackPanel>
+        </Grid>
+    </Grid>
+</UserControl>

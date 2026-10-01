@@ -20,10 +20,10 @@ public partial class App : Application
     internal static PlayerViewModel ViewModel { get; private set; } = null!;
     internal static MainWindow MainWindow { get; private set; } = null!;
 
-    /// <summary>根目录只在这里拼一次，不允许从界面输入或配置文件读取（界面接入方案 v1 §3）。
-    /// <c>SonglistsViewModel</c>（UI-2 起创建，<c>MusicCore/ViewModels/SonglistsViewModel.cs</c>
-    /// 还不存在）暂不在这里声明，等 UI-2 补上。</summary>
+    /// <summary>根目录只在这里拼一次，不允许从界面输入或配置文件读取（界面接入方案 v1 §3）。</summary>
     internal static SonglistService Songlists { get; private set; } = null!;
+
+    internal static SonglistsViewModel SonglistsVm { get; private set; } = null!;
 
     internal bool IsQuitting => _quitting;
 
@@ -81,6 +81,10 @@ public partial class App : Application
         // 独立状态下的 ClearCurrentSelection）必须先跑完，RestoreNowPlaying 才能正确恢复
         ViewModel.RestoreLastSession();
         ViewModel.RestoreNowPlaying();
+
+        // UI-2：异步加载，不阻塞窗口显示（界面接入方案 v1 §2.2）
+        SonglistsVm = new SonglistsViewModel(Songlists, ViewModel);
+        _ = SonglistsVm.LoadAsync();
 
         // 上次退出时开着桌面歌词，这次自动恢复
         if (ViewModel.DesktopLyricsEnabled) ShowDesktopLyrics();
@@ -189,6 +193,7 @@ public partial class App : Application
         // 所有退出入口（托盘「退出」等）都汇到这里；FlushNowPlaying 必须在 Dispose 之前、
         // 同步执行完（界面接入方案 v1 §2.2：不要另挂到 MainWindow.Closed，那里只是隐藏窗口到托盘）
         ViewModel.FlushNowPlaying();
+        SonglistsVm.Dispose();
         ViewModel.Dispose();
         Exit();
     }

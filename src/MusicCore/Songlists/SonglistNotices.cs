@@ -15,6 +15,17 @@ public static class SonglistNotices
     /// （新建、改名、删除、添加、移除、调整顺序、存为歌单）都用这一个，不要各自拼。</summary>
     public static string ForSaveFailed(SaveFailureReason reason) => $"歌单保存失败：{ReasonText(reason)}。本次操作未生效";
 
+    /// <summary>新建/重命名/删除三类对话框 + 操作的错误文字（界面接入方案 v1 §2.5），
+    /// 所有调用方都用这一个，和 T-003 v7 §2.3 表一字不差。</summary>
+    public static string ForError(SonglistErrorCode code, SaveFailureReason? reason, string name) => code switch
+    {
+        SonglistErrorCode.NameEmpty     => "歌单名称不能为空",
+        SonglistErrorCode.NameTooLong   => "歌单名称不能超过 100 个字符",
+        SonglistErrorCode.NameDuplicate => $"已有同名歌单「{name}」",
+        SonglistErrorCode.NotFound      => $"歌单「{name}」已不存在",
+        _                               => ForSaveFailed(reason ?? SaveFailureReason.Other),
+    };
+
     private static string ReasonText(SaveFailureReason reason) => reason switch
     {
         SaveFailureReason.AccessDenied => "没有写入权限（数据目录或文件是只读的）",

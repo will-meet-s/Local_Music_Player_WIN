@@ -27,6 +27,10 @@ internal static class ViewFormat
 
     public static string MatchCount(int count) => $"匹配 {count} 首";
 
+    // MARK: - UI-2：歌单
+
+    public static string SonglistCount(int count) => $"{count} 首";
+
     public static string PlayPauseGlyph(bool isPlaying) => isPlaying ? "\uF8AE" : "\uF5B0";
 
     public static string PlayPauseTip(bool isPlaying) => isPlaying ? "暂停" : "播放";
