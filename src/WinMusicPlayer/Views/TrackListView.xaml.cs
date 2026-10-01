@@ -63,7 +63,9 @@ public sealed partial class TrackListView : UserControl
         if ((e.OriginalSource as FrameworkElement)?.DataContext is not Track track) return;
 
         var index = ViewModel.Tracks.IndexOf(track);
-        if (index >= 0) ViewModel.PlayAt(index);
+        // 走命令而不是直接调用 PlayAt：PlayAt 是 async Task，直接调用会产生 CS4014 未等待调用，
+        // 异常也接不住；PlayAtCommand 内部用 Observe 包了一层，异常会写进 ErrorMessage（界面接入方案 v1 §2.2）
+        if (index >= 0) ViewModel.PlayAtCommand.Execute(index);
     }
 
     // MARK: - 搜索

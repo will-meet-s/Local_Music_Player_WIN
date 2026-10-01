@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Runtime.InteropServices;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
+using MusicCore.Songlists;
 using MusicCore.ViewModels;
 using WinMusicPlayer.Interop;
 
@@ -18,6 +19,11 @@ public partial class App : Application
 
     internal static PlayerViewModel ViewModel { get; private set; } = null!;
     internal static MainWindow MainWindow { get; private set; } = null!;
+
+    /// <summary>根目录只在这里拼一次，不允许从界面输入或配置文件读取（界面接入方案 v1 §3）。
+    /// <c>SonglistsViewModel</c>（UI-2 起创建，<c>MusicCore/ViewModels/SonglistsViewModel.cs</c>
+    /// 还不存在）暂不在这里声明，等 UI-2 补上。</summary>
+    internal static SonglistService Songlists { get; private set; } = null!;
 
     internal bool IsQuitting => _quitting;
 
@@ -54,7 +60,12 @@ public partial class App : Application
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
         // 顺序 4
-        ViewModel = new PlayerViewModel();
+        Songlists = new SonglistService(Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "WinMusicPlayer", "songlists"));
+        SonglistService.Diagnostic = (tag, msg) => CrashLog.WriteNote(tag, msg);
+
+        ViewModel = new PlayerViewModel(Songlists);
         ViewModel.PropertyChanged += OnViewModelPropertyChanged;
 
         // 顺序 5
@@ -65,8 +76,11 @@ public partial class App : Application
         RegisterShutdown(tray.Dispose);
         RegisterShutdown(CloseDesktopLyrics);
 
-        // 顺序 6
+        // 顺序 6：RestoreLastSession() 和 RestoreNowPlaying() 之间不能插 await（T-010 v2、
+        // 界面接入方案 v1 §2.2、§7 坑 6）——RestoreLastSession 的同步部分（Scan 的同步重置，
+        // 独立状态下的 ClearCurrentSelection）必须先跑完，RestoreNowPlaying 才能正确恢复
         ViewModel.RestoreLastSession();
+        ViewModel.RestoreNowPlaying();
 
         // 上次退出时开着桌面歌词，这次自动恢复
         if (ViewModel.DesktopLyricsEnabled) ShowDesktopLyrics();
@@ -172,6 +186,9 @@ public partial class App : Application
             }
         }
 
+        // 所有退出入口（托盘「退出」等）都汇到这里；FlushNowPlaying 必须在 Dispose 之前、
+        // 同步执行完（界面接入方案 v1 §2.2：不要另挂到 MainWindow.Closed，那里只是隐藏窗口到托盘）
+        ViewModel.FlushNowPlaying();
         ViewModel.Dispose();
         Exit();
     }

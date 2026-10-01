@@ -1,0 +1,115 @@
+using System.Collections.Specialized;
+using System.ComponentModel;
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
+using MusicCore.Models;
+using MusicCore.ViewModels;
+using Windows.UI;
+
+namespace WinMusicPlayer.Views;
+
+public sealed partial class NowPlayingListView : UserControl
+{
+    public NowPlayingListView()
+    {
+        InitializeComponent();
+
+        ViewModel.NowPlaying.Items.CollectionChanged += OnItemsChanged;
+        ViewModel.PropertyChanged += OnViewModelPropertyChanged;
+
+        UpdateEmptyState();
+    }
+
+    public PlayerViewModel ViewModel => App.ViewModel;
+
+    private void OnItemsChanged(object? sender, NotifyCollectionChangedEventArgs e) => UpdateEmptyState();
+
+    // 集合的 Count 变化能不能通知到界面在 WinUI 下没有保证，所以空态在这里手动更新（同 TrackListView）
+    private void UpdateEmptyState() =>
+        EmptyState.Visibility = ViewModel.NowPlaying.Items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+
+    private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(PlayerViewModel.NowPlayingIndex)) RefreshCurrentRowVisuals();
+    }
+
+    /// <summary>
+    /// 双击空白处时 SelectedIndex 还是上一次选中的那一项，不能靠它判断，
+    /// 只能看双击命中的 DataContext 是不是一个 Track（同 TrackListView 的做法）。
+    /// </summary>
+    private void OnTrackListDoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
+    {
+        if ((e.OriginalSource as FrameworkElement)?.DataContext is not Track track) return;
+
+        var index = ViewModel.NowPlaying.Items.IndexOf(track);
+        if (index >= 0) ViewModel.PlayNowPlayingAtCommand.Execute(index);
+    }
+
+    // MARK: - 当前行视觉（播放图标 + 强调色文字）
+
+    /// <summary>
+    /// 共用行模板不知道"谁在播放"——这是播放列表特有的、依赖下标的状态，不是 Track 自身的属性，
+    /// 所以在这里用 ContainerContentChanging 覆盖命名元素的视觉，而不是在模板里用 x:Bind 表达。
+    /// </summary>
+    private void OnContainerContentChanging(ListViewBase sender, ContainerContentChangingEventArgs args)
+    {
+        if (args.InRecycleQueue)
+        {
+            ApplyRowVisual(args.ItemContainer, isCurrent: false);
+            return;
+        }
+
+        args.RegisterUpdateCallback(OnContainerUpdateCallback);
+    }
+
+    private void OnContainerUpdateCallback(ListViewBase sender, ContainerContentChangingEventArgs args) =>
+        ApplyRowVisual(args.ItemContainer, args.ItemIndex == ViewModel.NowPlayingIndex);
+
+    /// <summary>当前行从别处变化（切歌、自动切歌）时，刷新已经实现化的容器；
+    /// 还没实现化的容器会在 <see cref="OnContainerContentChanging"/> 里按当时的下标正确设置。</summary>
+    private void RefreshCurrentRowVisuals()
+    {
+        for (var i = 0; i < ViewModel.NowPlaying.Items.Count; i++)
+        {
+            if (TrackList.ContainerFromIndex(i) is not ListViewItem container) continue;
+            ApplyRowVisual(container, i == ViewModel.NowPlayingIndex);
+        }
+    }
+
+    private static void ApplyRowVisual(DependencyObject container, bool isCurrent)
+    {
+        if (FindDescendant(container, "PlayIndicator") is TextBlock indicator)
+            indicator.Visibility = isCurrent ? Visibility.Visible : Visibility.Collapsed;
+
+        if (FindDescendant(container, "TitleText") is TextBlock title)
+            title.Foreground = isCurrent
+                ? ViewFormat.ResourceBrush("AccentBrush", Color.FromArgb(0xFF, 0x5C, 0xA8, 0xFF))
+                : ViewFormat.ResourceBrush("TextBrush", Color.FromArgb(0xFF, 0xF2, 0xF2, 0xF5));
+    }
+
+    private static FrameworkElement? FindDescendant(DependencyObject root, string name)
+    {
+        var count = VisualTreeHelper.GetChildrenCount(root);
+        for (var i = 0; i < count; i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is FrameworkElement element && element.Name == name) return element;
+            if (FindDescendant(child, name) is { } found) return found;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// <see cref="LibraryPane"/> 切换到这一页时调用：打开页面时自动滚动到当前行
+    /// （T-001+T-008 v5 §4.5）。
+    /// </summary>
+    public void ScrollToCurrent()
+    {
+        var index = ViewModel.NowPlayingIndex;
+        if (index < 0 || index >= ViewModel.NowPlaying.Items.Count) return;
+        TrackList.ScrollIntoView(ViewModel.NowPlaying.Items[index]);
+    }
+}

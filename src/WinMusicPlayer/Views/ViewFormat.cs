@@ -17,6 +17,10 @@ internal static class ViewFormat
     public static Visibility VisibleIfNotEmpty(string? text) =>
         string.IsNullOrEmpty(text) ? Visibility.Collapsed : Visibility.Visible;
 
+    /// <summary>同 <see cref="VisibleIfNotEmpty"/>，但返回 <see cref="bool"/>——
+    /// <c>InfoBar.IsOpen</c> 是 bool 属性，不是 Visibility（UI-1 Notice 提示条）。</summary>
+    public static bool VisibleIfNotEmptyBool(string? text) => !string.IsNullOrEmpty(text);
+
     public static string SortGlyph(bool ascending) => ascending ? "\uE74B" : "\uE74A";
 
     public static string SortTip(bool ascending) => ascending ? "升序" : "降序";
@@ -30,6 +34,18 @@ internal static class ViewFormat
     public static string LayoutTip(string name) => $"当前：{name}，点击切换";
 
     public static string Percent(double value) => $"{Math.Round(value * 100)}%";
+
+    // MARK: - UI-1：共用行模板（T-007 失效曲目样式）
+
+    public static double RowOpacity(bool isAvailable) => isAvailable ? 1.0 : 0.45;
+
+    public static Visibility VisibleIfUnavailable(bool isAvailable) =>
+        isAvailable ? Visibility.Collapsed : Visibility.Visible;
+
+    /// <summary>可用时返回 null——<c>ToolTipService.ToolTip</c> 绑定为 null 时不显示提示，
+    /// 不需要额外控制 <c>ToolTipService.IsEnabled</c>。</summary>
+    public static string? UnavailableTip(bool isAvailable, string path) =>
+        isAvailable ? null : $"找不到文件：{path}";
 
     /// <summary>
     /// 按资源键取画刷，查不到时写诊断日志并回退成用 <paramref name="fallback"/> 新建的纯色画刷，

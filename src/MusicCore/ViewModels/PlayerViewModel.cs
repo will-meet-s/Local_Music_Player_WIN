@@ -597,6 +597,10 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
         }
         else
         {
+            // 没有上次文件夹、RestoreLastSession 没有触发扫描时（IsScanning 还是 false），
+            // 不留一个永远用不上的待定位路径（界面接入方案 v1 §2.2 第三行）
+            if (!IsScanning) return;
+
             // 跟随状态：items 本来就是空数组（方案 §3），列表内容交给即将开始的曲库扫描去填；
             // 只留下 currentPath，等 RebuildDisplayed 第一次跑完（走 SyncFromLibrary 之后）去定位
             _pendingFollowCurrent = snapshot.CurrentPath;
@@ -604,7 +608,9 @@ public sealed class PlayerViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// <c>MainWindow.Closed</c> 调用：取消还在等待的去抖，无条件同步保存一次，不管这次运行期间
+    /// 退出时调用（界面接入方案 v1 §2.2：实际接线在 <c>App.xaml.cs</c> 的 <c>Quit()</c> 里，
+    /// 在 <see cref="Dispose"/> 之前；不要另挂到 <c>MainWindow.Closed</c>——那里只是隐藏窗口到
+    /// 托盘，不是真正退出）。取消还在等待的去抖，无条件同步保存一次，不管这次运行期间
     /// 播放列表有没有变化过（FR-028 ④：以最后退出的窗口为准）。最多等 2 秒（方案 §4.1）——
     /// <see cref="NowPlayingStore.SaveNow"/> 本身是同步阻塞的文件 IO，没有自带超时，这里用后台
     /// 线程 + <see cref="Task.Wait(TimeSpan)"/> 兜底，避免磁盘卡住时无限期拖住退出流程。

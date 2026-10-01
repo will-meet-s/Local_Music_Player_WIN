@@ -15,6 +15,7 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
@@ -127,17 +128,24 @@
                 </Grid>
             </Border>
 
-            <!-- 主体：左曲目列表 + 右正在播放/歌词 -->
-            <Grid Grid.Row="4">
+            <!-- 提示条（T-008 Notice，和错误提示条分开显示，界面接入方案 v1 §2.2） -->
+            <InfoBar x:Name="NoticeBar" Grid.Row="4"
+                     Severity="Informational"
+                     Message="{x:Bind ViewModel.Notice, Mode=OneWay}"
+                     IsOpen="{x:Bind views:ViewFormat.VisibleIfNotEmptyBool(ViewModel.Notice), Mode=OneWay}"
+                     CloseButtonClick="OnNoticeCloseButtonClick" />
+
+            <!-- 主体：左栏页签（曲库｜歌单｜播放列表） + 右正在播放/歌词 -->
+            <Grid Grid.Row="5">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="340" MinWidth="260" MaxWidth="480" />
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" MinWidth="360" />
                 </Grid.ColumnDefinitions>
 
-                <!-- T-002：曲目列表 -->
+                <!-- UI-1：曲库｜歌单｜播放列表三个页签 -->
                 <Grid x:Name="TrackListHost" Grid.Column="0">
-                    <views:TrackListView />
+                    <views:LibraryPane />
                 </Grid>
 
                 <!-- WinUI 没有 GridSplitter，T-001 先放一条固定分隔线 -->
@@ -149,10 +157,10 @@
                 </Grid>
             </Grid>
 
-            <Border Grid.Row="5" Height="1" Background="{StaticResource SeparatorBrush}" />
+            <Border Grid.Row="6" Height="1" Background="{StaticResource SeparatorBrush}" />
 
             <!-- T-004：播放控制栏 -->
-            <Border x:Name="ControlsHost" Grid.Row="6">
+            <Border x:Name="ControlsHost" Grid.Row="7">
                 <views:ControlsBar />
             </Border>
         </Grid>
