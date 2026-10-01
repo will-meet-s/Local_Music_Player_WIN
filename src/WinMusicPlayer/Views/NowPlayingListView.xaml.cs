@@ -16,7 +16,9 @@ public sealed partial class NowPlayingListView : UserControl
     {
         InitializeComponent();
 
-        ViewModel.NowPlaying.Items.CollectionChanged += OnItemsChanged;
+        // ReadOnlyObservableCollection<T>.CollectionChanged 是 protected，必须通过接口订阅
+        // （M-1，同 T-001 d1ee374 修过的问题）
+        ((INotifyCollectionChanged)ViewModel.NowPlaying.Items).CollectionChanged += OnItemsChanged;
         ViewModel.PropertyChanged += OnViewModelPropertyChanged;
 
         UpdateEmptyState();
@@ -24,7 +26,13 @@ public sealed partial class NowPlayingListView : UserControl
 
     public PlayerViewModel ViewModel => App.ViewModel;
 
-    private void OnItemsChanged(object? sender, NotifyCollectionChangedEventArgs e) => UpdateEmptyState();
+    private void OnItemsChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        UpdateEmptyState();
+        // 编辑之后，当前行的下标可能没变，但内容挪动了（比如在当前行之后插入），
+        // 已经生成的行不会自动刷新，这里补一次（M-2③）
+        RefreshCurrentRowVisuals();
+    }
 
     // 集合的 Count 变化能不能通知到界面在 WinUI 下没有保证，所以空态在这里手动更新（同 TrackListView）
     private void UpdateEmptyState() =>
@@ -67,15 +75,24 @@ public sealed partial class NowPlayingListView : UserControl
     private void OnContainerUpdateCallback(ListViewBase sender, ContainerContentChangingEventArgs args) =>
         ApplyRowVisual(args.ItemContainer, args.ItemIndex == ViewModel.NowPlayingIndex);
 
-    /// <summary>当前行从别处变化（切歌、自动切歌）时，刷新已经实现化的容器；
-    /// 还没实现化的容器会在 <see cref="OnContainerContentChanging"/> 里按当时的下标正确设置。</summary>
+    /// <summary>
+    /// 当前行从别处变化（切歌、自动切歌、编辑）时，刷新已经实现化的容器；还没实现化的容器会在
+    /// <see cref="OnContainerContentChanging"/> 里按当时的下标正确设置。
+    /// <para>
+    /// 只遍历 <see cref="ItemsControl.ItemsPanelRoot"/> 里实际存在的容器（M-2①），不对整个列表
+    /// 循环调用 <see cref="ListViewBase.ContainerFromIndex"/>——1 万首时每切一次歌都要循环 1 万次，
+    /// 而且页面不在视觉树里（<see cref="LibraryPane"/> 切到别的页签）时也会白跑。
+    /// <see cref="FrameworkElement.IsLoaded"/> 为 false（页面本来就不在视觉树里）时直接跳过（M-2②），
+    /// 等 <see cref="ScrollToCurrent"/> 在重新打开页面时补上这次漏掉的刷新（M-2④）。
+    /// </para>
+    /// </summary>
     private void RefreshCurrentRowVisuals()
     {
-        for (var i = 0; i < ViewModel.NowPlaying.Items.Count; i++)
-        {
-            if (TrackList.ContainerFromIndex(i) is not ListViewItem container) continue;
-            ApplyRowVisual(container, i == ViewModel.NowPlayingIndex);
-        }
+        if (!IsLoaded) return;
+        if (TrackList.ItemsPanelRoot is not Panel panel) return;
+
+        foreach (var container in panel.Children.OfType<ListViewItem>())
+            ApplyRowVisual(container, TrackList.IndexFromContainer(container) == ViewModel.NowPlayingIndex);
     }
 
     private static void ApplyRowVisual(DependencyObject container, bool isCurrent)
@@ -108,6 +125,9 @@ public sealed partial class NowPlayingListView : UserControl
     /// </summary>
     public void ScrollToCurrent()
     {
+        // 页面不在视觉树期间，RefreshCurrentRowVisuals 被 IsLoaded 挡住跳过的刷新，在这里补上（M-2④）
+        RefreshCurrentRowVisuals();
+
         var index = ViewModel.NowPlayingIndex;
         if (index < 0 || index >= ViewModel.NowPlaying.Items.Count) return;
         TrackList.ScrollIntoView(ViewModel.NowPlaying.Items[index]);
