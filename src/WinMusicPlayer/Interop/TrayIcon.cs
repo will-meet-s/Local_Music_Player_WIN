@@ -159,7 +159,7 @@ internal sealed class TrayIcon : IDisposable
 
     private readonly PlayerViewModel _viewModel;
     private readonly Action _showMainWindow;
-    private readonly Action _toggleLyricsLock;
+    private readonly Action _lockLyrics;
     private readonly Func<bool> _isLyricsLocked;
     private readonly Action _quit;
 
@@ -171,12 +171,12 @@ internal sealed class TrayIcon : IDisposable
     private readonly bool _iconOwned;
     private bool _disposed;
 
-    public TrayIcon(PlayerViewModel viewModel, Action showMainWindow, Action toggleLyricsLock,
+    public TrayIcon(PlayerViewModel viewModel, Action showMainWindow, Action lockLyrics,
         Func<bool> isLyricsLocked, Action quit)
     {
         _viewModel = viewModel;
         _showMainWindow = showMainWindow;
-        _toggleLyricsLock = toggleLyricsLock;
+        _lockLyrics = lockLyrics;
         _isLyricsLocked = isLyricsLocked;
         _quit = quit;
 
@@ -289,10 +289,11 @@ internal sealed class TrayIcon : IDisposable
             (UIntPtr)CmdToggleLyrics, "桌面歌词");
 
         var lockChecked = _isLyricsLocked();
-        var lockGrayed = !_viewModel.DesktopLyricsEnabled;
+        // DEF-007 v3.1：托盘只能锁定——已经锁定时打勾并变灰，没开桌面歌词时也变灰
+        var lockGrayed = !_viewModel.DesktopLyricsEnabled || lockChecked;
         var lockFlags = MfString | (lockChecked ? MfChecked : 0) | (lockGrayed ? MfGrayed : 0);
         AppendMenuW(menu, lockFlags, (UIntPtr)CmdToggleLyricsLock, "锁定桌面歌词");
-        // DEF-007 v2：弹出菜单时记一次锁定项当时的状态，排查「业主看到打勾以为点了是锁定」这种情况
+        // 弹出菜单时记一次锁定项当时的状态，排查「业主看到打勾以为点了是锁定」这种情况
         CrashLog.WriteNote("Tray", $"menu lockItem checked={lockChecked} grayed={lockGrayed}");
 
         AppendMenuW(menu, MfSeparator, UIntPtr.Zero, "");
@@ -323,8 +324,8 @@ internal sealed class TrayIcon : IDisposable
             case CmdCyclePlayMode: _viewModel.CyclePlayMode(); break;
             case CmdToggleLyrics: _viewModel.DesktopLyricsEnabled = !_viewModel.DesktopLyricsEnabled; break;
             case CmdToggleLyricsLock:
-                CrashLog.WriteNote("Tray", "cmd=toggleLock");
-                _toggleLyricsLock();
+                CrashLog.WriteNote("Tray", "cmd=lock");
+                _lockLyrics();
                 break;
             case CmdRefresh: _viewModel.RefreshLibrary(); break;
             case CmdShowMainWindow: _showMainWindow(); break;

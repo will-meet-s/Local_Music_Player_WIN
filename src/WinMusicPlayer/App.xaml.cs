@@ -31,9 +31,10 @@ public partial class App : Application
     internal bool IsLyricsLocked => _lyricsWindow?.IsLocked ?? false;
 
     /// <summary>
-    /// DEF-007 v3：所有锁定和解锁都收敛到这一个方法——托盘菜单（过渡期）和悬停解锁按钮都调它。
-    /// 锁定：沿用原来在当前窗口上改样式的写法。解锁：不在原窗口上改样式，而是把浮层关掉、
-    /// 以「未锁定」状态重新创建，从根上排除「样式改了但没生效」这种情况（DEF-007 v2 的结论）。
+    /// DEF-007 v3/v3.1：所有锁定和解锁都收敛到这一个方法——托盘菜单（只能锁定）和悬停解锁按钮
+    /// （只能解锁）都调它。锁定：沿用原来在当前窗口上改样式的写法，已经锁定时什么也不做，
+    /// 防止菜单变灰之前有重复点击。解锁：不在原窗口上改样式，而是把浮层关掉、以「未锁定」状态
+    /// 重新创建，从根上排除「样式改了但没生效」这种情况（DEF-007 v2 的结论）。
     /// </summary>
     internal void SetLyricsLocked(bool locked)
     {
@@ -49,7 +50,7 @@ public partial class App : Application
 
         if (locked)
         {
-            w.SetLocked(true);
+            if (!before) w.SetLocked(true);
             return;
         }
 
@@ -59,9 +60,6 @@ public partial class App : Application
         ShowDesktopLyrics();       // 新窗口在 OnRootLoaded 里恢复位置；构造时 SetEnabled(false)
         CrashLog.WriteNote("Lock", $"unlock rebuilt window={(_lyricsWindow is null ? "null" : "open")}");
     }
-
-    /// <summary>托盘菜单的锁定项还在用（过渡期，等 v3.1 把它改掉），行为和之前一致：切换当前状态。</summary>
-    internal void ToggleLyricsLock() => SetLyricsLocked(!IsLyricsLocked);
 
     /// <summary>主窗口只创建一次，关窗只是隐藏，所以这里不需要像基线那样重建窗口。</summary>
     internal void ShowMainWindow()
@@ -103,7 +101,7 @@ public partial class App : Application
         MainWindow = new MainWindow();
         MainWindow.Activate();
 
-        var tray = new TrayIcon(ViewModel, ShowMainWindow, ToggleLyricsLock, () => IsLyricsLocked, Quit);
+        var tray = new TrayIcon(ViewModel, ShowMainWindow, () => SetLyricsLocked(true), () => IsLyricsLocked, Quit);
         RegisterShutdown(tray.Dispose);
         RegisterShutdown(CloseDesktopLyrics);
 
