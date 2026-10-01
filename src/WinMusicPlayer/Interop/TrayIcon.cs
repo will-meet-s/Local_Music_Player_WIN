@@ -48,7 +48,6 @@ internal sealed class TrayIcon : IDisposable
     private const int CmdStop = 104;
     private const int CmdCyclePlayMode = 105;
     private const int CmdToggleLyrics = 106;
-    private const int CmdToggleLyricsLock = 107;
     private const int CmdRefresh = 108;
     private const int CmdShowMainWindow = 109;
     private const int CmdQuit = 110;
@@ -159,8 +158,6 @@ internal sealed class TrayIcon : IDisposable
 
     private readonly PlayerViewModel _viewModel;
     private readonly Action _showMainWindow;
-    private readonly Action _lockLyrics;
-    private readonly Func<bool> _isLyricsLocked;
     private readonly Action _quit;
 
     // 窗口过程的委托必须存进实例字段：被垃圾回收后，程序会在收到下一条消息时崩溃
@@ -171,13 +168,10 @@ internal sealed class TrayIcon : IDisposable
     private readonly bool _iconOwned;
     private bool _disposed;
 
-    public TrayIcon(PlayerViewModel viewModel, Action showMainWindow, Action lockLyrics,
-        Func<bool> isLyricsLocked, Action quit)
+    public TrayIcon(PlayerViewModel viewModel, Action showMainWindow, Action quit)
     {
         _viewModel = viewModel;
         _showMainWindow = showMainWindow;
-        _lockLyrics = lockLyrics;
-        _isLyricsLocked = isLyricsLocked;
         _quit = quit;
 
         _wndProc = WndProcHandler;
@@ -288,14 +282,6 @@ internal sealed class TrayIcon : IDisposable
         AppendMenuW(menu, MfString | (_viewModel.DesktopLyricsEnabled ? MfChecked : 0),
             (UIntPtr)CmdToggleLyrics, "桌面歌词");
 
-        var lockChecked = _isLyricsLocked();
-        // DEF-007 v3.1：托盘只能锁定——已经锁定时打勾并变灰，没开桌面歌词时也变灰
-        var lockGrayed = !_viewModel.DesktopLyricsEnabled || lockChecked;
-        var lockFlags = MfString | (lockChecked ? MfChecked : 0) | (lockGrayed ? MfGrayed : 0);
-        AppendMenuW(menu, lockFlags, (UIntPtr)CmdToggleLyricsLock, "锁定桌面歌词");
-        // 弹出菜单时记一次锁定项当时的状态，排查「业主看到打勾以为点了是锁定」这种情况
-        CrashLog.WriteNote("Tray", $"menu lockItem checked={lockChecked} grayed={lockGrayed}");
-
         AppendMenuW(menu, MfSeparator, UIntPtr.Zero, "");
         AppendMenuW(menu, MfString, (UIntPtr)CmdRefresh, "刷新曲库");
         AppendMenuW(menu, MfString, (UIntPtr)CmdShowMainWindow, "显示主窗口");
@@ -323,10 +309,6 @@ internal sealed class TrayIcon : IDisposable
             case CmdStop: _viewModel.Stop(); break;
             case CmdCyclePlayMode: _viewModel.CyclePlayMode(); break;
             case CmdToggleLyrics: _viewModel.DesktopLyricsEnabled = !_viewModel.DesktopLyricsEnabled; break;
-            case CmdToggleLyricsLock:
-                CrashLog.WriteNote("Tray", "cmd=lock");
-                _lockLyrics();
-                break;
             case CmdRefresh: _viewModel.RefreshLibrary(); break;
             case CmdShowMainWindow: _showMainWindow(); break;
             case CmdQuit: _quit(); break;

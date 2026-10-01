@@ -27,14 +27,11 @@ public partial class App : Application
 
     internal bool IsQuitting => _quitting;
 
-    /// <summary>窗口没开时返回 false，这是基线的行为——托盘菜单在桌面歌词关着时不会读到这个值。</summary>
-    internal bool IsLyricsLocked => _lyricsWindow?.IsLocked ?? false;
-
     /// <summary>
-    /// DEF-007 v3/v3.1：所有锁定和解锁都收敛到这一个方法——托盘菜单（只能锁定）和悬停解锁按钮
-    /// （只能解锁）都调它。锁定：沿用原来在当前窗口上改样式的写法，已经锁定时什么也不做，
-    /// 防止菜单变灰之前有重复点击。解锁：不在原窗口上改样式，而是把浮层关掉、以「未锁定」状态
-    /// 重新创建，从根上排除「样式改了但没生效」这种情况（DEF-007 v2 的结论）。
+    /// DEF-007 v3/v3.1/v3.2：所有锁定和解锁都收敛到这一个方法——浮层工具条的锁定按钮和悬停解锁
+    /// 按钮都调它，托盘不再有锁定入口（v3.2，C-8 整项去掉）。锁定：沿用原来在当前窗口上改样式的
+    /// 写法，已经锁定时什么也不做，防止重复点击。解锁：不在原窗口上改样式，而是把浮层关掉、以
+    /// 「未锁定」状态重新创建，从根上排除「样式改了但没生效」这种情况（DEF-007 v2 的结论）。
     /// </summary>
     internal void SetLyricsLocked(bool locked)
     {
@@ -101,7 +98,7 @@ public partial class App : Application
         MainWindow = new MainWindow();
         MainWindow.Activate();
 
-        var tray = new TrayIcon(ViewModel, ShowMainWindow, () => SetLyricsLocked(true), () => IsLyricsLocked, Quit);
+        var tray = new TrayIcon(ViewModel, ShowMainWindow, Quit);
         RegisterShutdown(tray.Dispose);
         RegisterShutdown(CloseDesktopLyrics);
 
@@ -123,8 +120,23 @@ public partial class App : Application
     {
         if (e.PropertyName != nameof(PlayerViewModel.DesktopLyricsEnabled)) return;
 
-        if (ViewModel.DesktopLyricsEnabled) ShowDesktopLyrics();
-        else CloseDesktopLyrics();
+        if (ViewModel.DesktopLyricsEnabled)
+        {
+            ShowDesktopLyrics();
+        }
+        else
+        {
+            // F-9：关闭桌面歌词时顺带解锁，下次打开就是未锁定。只改这个分支——CloseDesktopLyrics()
+            // 还被退出时的 RegisterShutdown 和解锁时的重建流程调用，写在那里会导致退出再启动也不
+            // 保持锁定，违反 FR-010「记住上次的设置」
+            if (ViewModel.Settings.DesktopLyricsLocked)
+            {
+                ViewModel.Settings.DesktopLyricsLocked = false;
+                ViewModel.Settings.Save();
+                CrashLog.WriteNote("Lock", "reset on close");
+            }
+            CloseDesktopLyrics();
+        }
     }
 
     private void ShowDesktopLyrics()
