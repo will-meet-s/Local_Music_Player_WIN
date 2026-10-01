@@ -26,19 +26,30 @@ Windows 本地音乐播放器。C# + WinUI 3（Windows App SDK 1.7，.NET 10）�
 
 ## 构建运行
 
+**开发运行**（需要 Windows 和 .NET 10 SDK，这条路径只用于开发调试）：
+
 ```powershell
 dotnet restore
 dotnet test                                     # 跑单元测试
 dotnet run --project src\WinMusicPlayer          # 直接运行
+```
 
-# 发布成单个 exe（自带运行时，对方不用装 .NET）
+**发布单个 exe**：
+
+```powershell
 dotnet publish src\WinMusicPlayer -p:PublishProfile=win-x64
 ```
 
-产物是 `publish\win-x64\WinMusicPlayer.exe`，**只有这一个文件**，可以随意拷到桌面或别的机器。
-参数都写在 `src\WinMusicPlayer\Properties\PublishProfiles\win-x64.pubxml` 里，其中
-`IncludeNativeLibrariesForSelfExtract` 是关键 —— 少了它，WPF 的原生库会散落在 exe 旁边，
-单独把 exe 拖走就打不开。
+产物是 `publish\win-x64\WinMusicPlayer.exe`，**只有这一个文件**，自带 .NET 和 Windows App SDK
+运行时，目标机器不用安装任何东西，可以随意拷到桌面或别的机器。第一次运行时会把内置的文件解压到
+`%TEMP%\.net\WinMusicPlayer\`，之后再启动就不再解压。关键参数写在
+`src\WinMusicPlayer\Properties\PublishProfiles\win-x64.pubxml` 里，其中
+`IncludeAllContentForSelfExtract` 决定了 WinUI 的资源能不能打进 exe。
+
+**从 CI 下载**：在 GitHub Actions 里打开对应的 run → 拉到页面最下方的 Artifacts → 下载
+`WinMusicPlayer-win-x64-single`。解压后，`win-x64` 目录里只有一个 exe，`manifest` 目录里是
+「本包包含」清单（`本包包含.txt`：提交号、构建时间、这个包相对基线新增的提交列表）。验收和分发，
+都以这个产物为准。
 
 也可以直接用 Visual Studio 2022 打开 `WinMusicPlayer.sln`。
 
@@ -137,7 +148,7 @@ WASAPI Exclusive 模式：绕过系统混音器，用文件原生采样率直推
 | CoreAudio 采样率匹配 | WASAPI 独占模式 | Windows 上的对应做法 |
 | 自研 FLAC Vorbis Comment 解析 | 删除 | TagLib# 原生支持，不必手写 |
 | `⌘Q` 等快捷键 | 删除 | macOS 版实测未生效，不移植 |
-| `.icns` / `.dmg` | `.ico` / 单文件 exe | — |
+| `.icns` / `.dmg` | `.ico` / 单文件 exe（自包含 WinUI 3） | — |
 | — | **桌面歌词** | Windows 版新增 |
 
 ## 代码结构

@@ -38,6 +38,9 @@ public partial class App : Application
 
     public App()
     {
+        // 顺序 0：日志轮转必须在本次运行写入任何一行日志之前完成，否则刚轮转完又追加到旧文件头上
+        CrashLog.RotateIfTooLarge();
+
         InitializeComponent();
 
         // 顺序 1、2：异常钩子和同步上下文检查必须在任何窗口创建之前完成

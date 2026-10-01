@@ -21,15 +21,12 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
       - run: dotnet publish src/WinMusicPlayer -p:PublishProfile=win-x64
-      - uses: actions/upload-artifact@v4
-        with:
-          name: WinMusicPlayer-win-x64-single
-          path: publish/win-x64/
-          retention-days: 14
       - run: dotnet publish src/WinMusicPlayer -c Release -p:Platform=x64 -r win-x64 --self-contained true -p:PublishSingleFile=false -o publish/win-x64-folder
       - uses: actions/upload-artifact@v4
         with:
@@ -47,3 +44,17 @@ jobs:
           if ($files.Count -ne 1 -or $files[0].Name -ne 'WinMusicPlayer.exe') {
             throw "单文件发布目录里有 $($files.Count) 个文件，不是只有一个 WinMusicPlayer.exe"
           }
+      - name: 生成本包包含清单
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force publish/manifest | Out-Null
+          $lines = @("提交：$(git rev-parse HEAD)", "构建时间（UTC）：$((Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm'))", "", "包含的提交（7775f6f 之后）：")
+          $lines += git log --oneline 7775f6f..HEAD
+          $lines | Set-Content -Encoding utf8 publish/manifest/本包包含.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WinMusicPlayer-win-x64-single
+          path: |
+            publish/win-x64/
+            publish/manifest/
+          retention-days: 14
