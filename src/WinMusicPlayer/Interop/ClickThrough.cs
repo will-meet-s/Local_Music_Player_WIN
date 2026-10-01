@@ -15,6 +15,12 @@ internal static class ClickThrough
     private const int WsExToolWindow = 0x00000080;
     private const uint LwaAlpha = 0x00000002;
 
+    private const uint SwpNoMove = 0x0002;
+    private const uint SwpNoSize = 0x0001;
+    private const uint SwpNoZOrder = 0x0004;
+    private const uint SwpNoActivate = 0x0010;
+    private const uint SwpFrameChanged = 0x0020;
+
     // internal：DesktopLyricsWindow 复用它读诊断用的扩展样式
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW", SetLastError = true)]
     internal static extern IntPtr GetWindowLongPtr(IntPtr hwnd, int index);
@@ -24,6 +30,9 @@ internal static class ClickThrough
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool SetLayeredWindowAttributes(IntPtr hwnd, uint crKey, byte bAlpha, uint dwFlags);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetWindowPos(IntPtr hwnd, IntPtr hwndInsertAfter, int x, int y, int cx, int cy, uint flags);
 
     /// <summary>
     /// WS_EX_TOOLWINDOW 始终保留，让窗口不出现在 Alt+Tab 和任务栏里。
@@ -49,5 +58,11 @@ internal static class ClickThrough
             style &= ~(WsExLayered | WsExTransparent);
             SetWindowLongPtr(hwnd, GwlExStyle, new IntPtr(style));
         }
+
+        // DEF-007：只改样式，系统有可能还在用缓存的旧样式，穿透切换不一定真正生效；
+        // 强制重新计算非客户区，并记录切换结果，方便定位「锁定后解不了锁」
+        SetWindowPos(hwnd, IntPtr.Zero, 0, 0, 0, 0,
+            SwpNoMove | SwpNoSize | SwpNoZOrder | SwpNoActivate | SwpFrameChanged);
+        CrashLog.WriteNote("DesktopLyrics", $"lock={enabled} exstyle=0x{style:X8}");
     }
 }

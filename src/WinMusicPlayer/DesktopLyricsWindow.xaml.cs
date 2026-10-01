@@ -63,7 +63,6 @@ public sealed partial class DesktopLyricsWindow : Window
         TextOutline.Attach(NextLine, NextShadowHost, 6f, 0.9f);
 
         SystemBackdrop = new TransparentBackdrop();
-        TransparentWindow.Enable(_hwnd);
 
         if (AppWindow.Presenter is OverlappedPresenter presenter)
         {
@@ -77,6 +76,9 @@ public sealed partial class DesktopLyricsWindow : Window
         AppWindow.IsShownInSwitchers = false;
         AppWindow.Title = "桌面歌词";
 
+        // presenter 配置会重新写窗口样式，TransparentWindow.Enable 去掉的非客户区边框样式
+        // 必须在它之后设置，否则会被 presenter 加回去（DEF-005 v2）
+        TransparentWindow.Enable(_hwnd);
         ClickThrough.SetEnabled(_hwnd, _settings.DesktopLyricsLocked);
 
         Root.Loaded += OnRootLoaded;

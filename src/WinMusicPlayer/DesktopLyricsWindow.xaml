@@ -22,7 +22,7 @@
             <StackPanel Orientation="Horizontal">
                 <Button x:Name="LockButton" Click="OnToggleLock"
                         Style="{StaticResource LyricsToolButton}"
-                        ToolTipService.ToolTip="锁定（锁定后鼠标穿透，不再挡住桌面）" />
+                        ToolTipService.ToolTip="锁定（锁定后鼠标穿透，不再挡住桌面。解锁：右键托盘图标 →「锁定桌面歌词」）" />
                 <Button Click="OnFontSmaller" Style="{StaticResource LyricsToolButton}"
                         Content="&#xE738;" ToolTipService.ToolTip="缩小字号" />
                 <Button Click="OnFontLarger" Style="{StaticResource LyricsToolButton}"
