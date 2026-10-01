@@ -14,13 +14,28 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
+            <!-- DEF-004：自绘标题栏，和内容区共用同一层亚克力/底色层，不要放任何可交互控件——
+                 整块都靠 SetTitleBar 交给系统当拖动区域 -->
+            <Grid x:Name="AppTitleBar" Grid.Row="0" Height="32" Background="Transparent">
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <Image Source="ms-appx:///Resources/AppIcon.png"
+                           Width="16" Height="16" Margin="12,0,0,0"
+                           VerticalAlignment="Center" />
+                    <TextBlock x:Name="AppTitleText" Text="音乐播放器"
+                               Margin="8,0,0,0" FontSize="12"
+                               Foreground="{StaticResource TextBrush}"
+                               VerticalAlignment="Center" />
+                </StackPanel>
+            </Grid>
+
             <!-- 顶栏 -->
-            <Grid Grid.Row="0" Margin="14,10">
+            <Grid Grid.Row="1" Margin="14,10">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
@@ -91,10 +106,10 @@
                 </Button>
             </Grid>
 
-            <Border Grid.Row="1" Height="1" Background="{StaticResource SeparatorBrush}" />
+            <Border Grid.Row="2" Height="1" Background="{StaticResource SeparatorBrush}" />
 
             <!-- 错误提示条 -->
-            <Border Grid.Row="2" Background="#33FF9500" Padding="14,8"
+            <Border Grid.Row="3" Background="#33FF9500" Padding="14,8"
                     Visibility="{x:Bind ViewModel.HasError, Mode=OneWay}">
                 <Grid>
                     <Grid.ColumnDefinitions>
@@ -113,7 +128,7 @@
             </Border>
 
             <!-- 主体：左曲目列表 + 右正在播放/歌词 -->
-            <Grid Grid.Row="3">
+            <Grid Grid.Row="4">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="340" MinWidth="260" MaxWidth="480" />
                     <ColumnDefinition Width="Auto" />
@@ -134,10 +149,10 @@
                 </Grid>
             </Grid>
 
-            <Border Grid.Row="4" Height="1" Background="{StaticResource SeparatorBrush}" />
+            <Border Grid.Row="5" Height="1" Background="{StaticResource SeparatorBrush}" />
 
             <!-- T-004：播放控制栏 -->
-            <Border x:Name="ControlsHost" Grid.Row="5">
+            <Border x:Name="ControlsHost" Grid.Row="6">
                 <views:ControlsBar />
             </Border>
         </Grid>

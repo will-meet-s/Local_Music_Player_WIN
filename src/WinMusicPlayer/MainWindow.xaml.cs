@@ -1,9 +1,12 @@
+using Microsoft.UI;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using MusicCore.ViewModels;
 using WinMusicPlayer.Interop;
+using WinMusicPlayer.Views;
 using WinRT.Interop;
 using Windows.Storage.Pickers;
+using Windows.UI;
 
 namespace WinMusicPlayer;
 
@@ -25,8 +28,14 @@ public sealed partial class MainWindow : Window
         AppWindow.Title = "音乐播放器";
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Resources", "AppIcon.ico"));
 
+        // DEF-004：标题栏延伸进内容区，和内容区共用同一层亚克力/底色层，不再是系统画的那一块纯色
+        ExtendsContentIntoTitleBar = true;
+        SetTitleBar(AppTitleBar);
+        ApplyTitleBarButtonColors();
+
         RootLayer.Loaded += OnRootLoaded;
         AppWindow.Closing += OnAppWindowClosing;
+        Activated += OnWindowActivated;
 
         // 主窗口只创建一次，不需要退订
         App.ViewModel.FolderPickRequested += PickFolder;
@@ -69,6 +78,32 @@ public sealed partial class MainWindow : Window
             args.Cancel = true;
             sender.Hide();
         }
+    }
+
+    /// <summary>
+    /// 右上角三个系统按钮背景透明，前景色用我们自己的文字色——
+    /// 否则延伸进内容区以后，这三个按钮还是系统默认的浅色，和深色主题不搭。
+    /// </summary>
+    private void ApplyTitleBarButtonColors()
+    {
+        var tb = AppWindow.TitleBar;
+        tb.ButtonBackgroundColor = Colors.Transparent;
+        tb.ButtonInactiveBackgroundColor = Colors.Transparent;
+        tb.ButtonForegroundColor = ColorHelper.FromArgb(0xFF, 0xF2, 0xF2, 0xF5);           // TextBrush
+        tb.ButtonInactiveForegroundColor = ColorHelper.FromArgb(0xFF, 0xA0, 0xA0, 0xAC);   // SecondaryTextBrush
+        tb.ButtonHoverBackgroundColor = ColorHelper.FromArgb(0x18, 0xFF, 0xFF, 0xFF);      // ControlFillBrush
+        tb.ButtonHoverForegroundColor = ColorHelper.FromArgb(0xFF, 0xF2, 0xF2, 0xF5);
+        tb.ButtonPressedBackgroundColor = ColorHelper.FromArgb(0x26, 0xFF, 0xFF, 0xFF);
+        tb.ButtonPressedForegroundColor = ColorHelper.FromArgb(0xFF, 0xF2, 0xF2, 0xF5);
+        // 关闭按钮悬停时的红色由系统自己处理，不用设置
+    }
+
+    /// <summary>失焦时标题文字退化成二级文字色，和系统标题栏的习惯一致。</summary>
+    private void OnWindowActivated(object sender, WindowActivatedEventArgs args)
+    {
+        AppTitleText.Foreground = args.WindowActivationState == WindowActivationState.Deactivated
+            ? ViewFormat.ResourceBrush("SecondaryTextBrush", Color.FromArgb(0xFF, 0xA0, 0xA0, 0xAC))
+            : ViewFormat.ResourceBrush("TextBrush", Color.FromArgb(0xFF, 0xF2, 0xF2, 0xF5));
     }
 
     private void OnDismissError(object sender, RoutedEventArgs e) => ViewModel.ErrorMessage = null;
