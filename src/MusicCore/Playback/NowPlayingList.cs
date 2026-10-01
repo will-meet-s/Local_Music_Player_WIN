@@ -184,11 +184,9 @@ public sealed class NowPlayingList
         if (distinct.Count == 0) return default;
 
         var cur = Queue.Current;
-        var wasFinished = Queue.IsFinished;
-        var hasCurrent = cur is not null && !wasFinished;
-        // 必须在 ApplyEdit 之前就记下这个值：ApplyEdit 不再清除 IsFinished（v5 修 M-4），
-        // 但 Current 马上会因为 ClearSelection 变成 null，到时候就分不清是这里还是"移除当前曲目"导致的
-        var stopPlayback = !hasCurrent && wasFinished;
+        // （v6）IsFinished 不再从 hasCurrent 里排除：需求 v1.9 §3.1，顺序播放放完最后一首后，
+        // 这一首仍是当前曲目，PlayNext 插入的歌应该排在它紧后面，不是排到列表开头
+        var hasCurrent = cur is not null;
 
         var pendingResumeIndex = Queue.PendingResumeItemIndex;
         var anchor = hasCurrent ? cur!.Value + 1 : pendingResumeIndex ?? 0;
@@ -202,14 +200,12 @@ public sealed class NowPlayingList
         _items.ReplaceAll(plan.NewItems);
         Queue.ApplyEdit(plan.Map, plan.NewItems.Count, plan.AddedIndices, placement, plan.RelocatedOldIndices);
 
-        // stopPlayback 为真：这首「已经放完」的曲目不应该继续算作当前曲目，
-        // 否则按「播放」会重播它而不是从新插入的第一首开始（v5 方案 §4.3 步骤 5）
-        if (stopPlayback) Queue.ClearSelection();
-
+        // （v6 改写）IsFinished 为真时不再特殊处理：不清选中、不卸载引擎，当前曲目标识仍在
+        // 已放完的那首上，引擎本来就是停着的，不会自动开始播放（需求 v1.9 §3.1、FR-004 ⑤）
         BecomeIndependentIfNeeded(wasIndependent);
         Changed?.Invoke();
 
-        return new EditResult(distinct.Count, plan.RelocatedOldIndices.Count, !wasIndependent, Queue.Current is null, stopPlayback);
+        return new EditResult(distinct.Count, plan.RelocatedOldIndices.Count, !wasIndependent, Queue.Current is null, StopPlayback: false);
     }
 
     /// <summary>加到末尾（FR-005）。输入按 <see cref="TrackIdentity"/> 去重；正在播放的那首不去掉，会被挪到末尾。</summary>

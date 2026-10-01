@@ -79,8 +79,13 @@ public class NowPlayingListEditTests
         Assert.Equal(newTracks, list.Items);
     }
 
+    // 测试 7b（v6 改写）：顺序播放放完（IsFinished 为真，Current 停在最后一首 B06）时
+    // PlayNext，插入的歌排在 B06 紧后面；Current 仍指向 B06，IsFinished 仍为 true，
+    // 不再停止播放（需求 v1.9 §3.1、FR-004 ⑤）；随后 Next(false) 前进到插入的那首，
+    // IsFinished 变为 false
+
     [Fact]
-    public void PlayNext_WhenFinished_InsertsAtStartAndClearsCurrent()
+    public void PlayNext_WhenFinished_InsertsRightAfterCurrentAndKeepsCurrent()
     {
         var list = new NowPlayingList(PlayMode.Sequential);
         var tracks = MakeTracks(3);
@@ -93,9 +98,15 @@ public class NowPlayingListEditTests
         var newTrack = new Track(@"C:\m\new.mp3");
         var result = list.PlayNext(new[] { newTrack }, tracks[2]);
 
-        Assert.True(result.NoCurrentAfter);
-        Assert.Null(list.Queue.Current);
-        Assert.Equal(newTrack, list.Items[0]);
+        Assert.False(result.StopPlayback);
+        Assert.True(list.Queue.IsFinished);
+        Assert.NotNull(list.Queue.Current);
+        Assert.Equal(tracks[2], list.Items[list.Queue.Current!.Value]);
+        Assert.Equal(newTrack, list.Items[list.Queue.Current!.Value + 1]);
+
+        var nextIndex = list.Queue.Next(auto: false);
+        Assert.False(list.Queue.IsFinished);
+        Assert.Equal(newTrack, list.Items[nextIndex!.Value]);
     }
 
     // 测试 7a：空列表 Append 不自动播放（FR-005）
@@ -372,11 +383,11 @@ public class NowPlayingListEditTests
         Assert.False(result.StopPlayback);  // ……但这不等于要停止播放（FR-006）
     }
 
-    // 测试 14g（v5 修 M-4）：顺序播放放完之后做别的编辑，IsFinished 仍然为 true；
-    // 这时再 PlayNext，因为 hasCurrent 为假（IsFinished），新曲目要插到下标 0，而不是接在已放完的曲目后面
+    // 测试 14g（v6 改写）：顺序播放放完之后先 Move 一次，IsFinished 仍然为 true；
+    // 这时再 PlayNext，插在当前曲目（已放完那首）的新位置紧后面，不停止播放（需求 v1.9 §3.1、FR-004 ⑤）
 
     [Fact]
-    public void Move_AfterSequentialFinished_KeepsIsFinishedTrue_ThenPlayNextInsertsAtStartAndStopsPlayback()
+    public void Move_AfterSequentialFinished_KeepsIsFinishedTrue_ThenPlayNextInsertsRightAfterCurrent()
     {
         var list = new NowPlayingList(PlayMode.Sequential);
         var tracks = MakeTracks(4);
@@ -394,8 +405,11 @@ public class NowPlayingListEditTests
         var newTrack = new Track(@"C:\m\new.mp3");
         var result = list.PlayNext(new[] { newTrack }, tracks[^1]);
 
-        Assert.True(result.StopPlayback);
-        Assert.Equal(newTrack, list.Items[0]);
+        Assert.False(result.StopPlayback);
+        Assert.True(list.Queue.IsFinished);
+        Assert.NotNull(list.Queue.Current);
+        Assert.Equal(tracks[^1], list.Items[list.Queue.Current!.Value]);
+        Assert.Equal(newTrack, list.Items[list.Queue.Current!.Value + 1]);
     }
 
     // 测试 15：Clear 清空列表，转为独立状态
