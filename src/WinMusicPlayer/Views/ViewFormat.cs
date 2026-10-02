@@ -68,7 +68,7 @@ internal static class ViewFormat
 
     /// <summary>控制条「播放列表」按钮的开关样式（T-017 v1 §2.3）：打开时强调色，关闭时普通文字色。</summary>
     public static Brush DrawerButtonBrush(bool isOpen) => isOpen
-        ? ResourceBrush("AccentBrush", Windows.UI.Color.FromArgb(0xFF, 0x00, 0x5A, 0x9E))
+        ? ResourceBrush("AccentBrush", Windows.UI.Color.FromArgb(0xFF, 0x00, 0x47, 0x7F))
         : ResourceBrush("TextBrush", Windows.UI.Color.FromArgb(0xFF, 0x1B, 0x1B, 0x1F));
 
     /// <summary>短线指示器用 Opacity 而不是 Visibility（T-017 评审 M-2）：Collapsed 会让它所在的

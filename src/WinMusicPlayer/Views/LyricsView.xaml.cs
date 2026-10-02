@@ -104,7 +104,7 @@ public sealed partial class LyricsView : UserControl
 
     private static void ApplyNormalStyle(TextBlock line)
     {
-        line.Foreground = ViewFormat.ResourceBrush("SecondaryTextBrush", Windows.UI.Color.FromArgb(0xFF, 0x5C, 0x5C, 0x66));
+        line.Foreground = ViewFormat.ResourceBrush("SecondaryTextBrush", Windows.UI.Color.FromArgb(0xFF, 0x45, 0x45, 0x4E));
         line.FontSize = 13;
         line.FontWeight = FontWeights.Normal;
     }

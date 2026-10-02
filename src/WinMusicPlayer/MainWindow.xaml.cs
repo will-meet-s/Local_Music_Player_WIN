@@ -109,7 +109,7 @@ public sealed partial class MainWindow : Window
     private void ApplyTitleBarButtonColors()
     {
         var foreground = ViewFormat.ResourceColor("TextBrush", Color.FromArgb(0xFF, 0x1B, 0x1B, 0x1F));
-        var inactiveForeground = ViewFormat.ResourceColor("SecondaryTextBrush", Color.FromArgb(0xFF, 0x5C, 0x5C, 0x66));
+        var inactiveForeground = ViewFormat.ResourceColor("SecondaryTextBrush", Color.FromArgb(0xFF, 0x45, 0x45, 0x4E));
         var hoverBackground = ViewFormat.ResourceColor("TitleBarButtonHoverColor", Color.FromArgb(0x0F, 0x00, 0x00, 0x00));
         var pressedBackground = ViewFormat.ResourceColor("TitleBarButtonPressedColor", Color.FromArgb(0x1A, 0x00, 0x00, 0x00));
 
@@ -129,7 +129,7 @@ public sealed partial class MainWindow : Window
     private void OnWindowActivated(object sender, WindowActivatedEventArgs args)
     {
         AppTitleText.Foreground = args.WindowActivationState == WindowActivationState.Deactivated
-            ? ViewFormat.ResourceBrush("SecondaryTextBrush", Color.FromArgb(0xFF, 0x5C, 0x5C, 0x66))
+            ? ViewFormat.ResourceBrush("SecondaryTextBrush", Color.FromArgb(0xFF, 0x45, 0x45, 0x4E))
             : ViewFormat.ResourceBrush("TextBrush", Color.FromArgb(0xFF, 0x1B, 0x1B, 0x1F));
     }
 

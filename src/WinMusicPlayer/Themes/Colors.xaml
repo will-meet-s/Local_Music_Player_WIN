@@ -2,13 +2,16 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
-    <!-- 配色：浅色外观（T-018 v1.2 §2.2，CR-W3）。取值和对比度计算见方案 §2.2；
-         强调色用 #FF005A9E，不用更亮的 #FF0067C0——后者在 55% 磨砂档对比度不够 4.5:1 -->
-    <Color x:Key="AccentColor">#FF005A9E</Color>
+    <!-- 配色：浅色外观（T-018 v1.3 §2.2a，CR-W3）。取值和对比度计算见方案 §2.2a：
+         55% 档 + 纯黑壁纸下，浅色 Thin 亚克力叠出的背景比最初估计的 #DCDCE0 暗很多
+         （保守估计灰度 80，悲观估计灰度 50），v1.2 的取值在这种情况下对比度不够，
+         评审 M-2 按这个更暗的背景重新加深了次要文字、第三级文字、强调色这三项；
+         正文 TextBrush 不受影响（改之前就已经 ≥ 4.5） -->
+    <Color x:Key="AccentColor">#FF00477F</Color>
     <SolidColorBrush x:Key="AccentBrush" Color="{StaticResource AccentColor}" />
     <SolidColorBrush x:Key="TextBrush" Color="#FF1B1B1F" />
-    <SolidColorBrush x:Key="SecondaryTextBrush" Color="#FF5C5C66" />
-    <SolidColorBrush x:Key="TertiaryTextBrush" Color="#FF6E6E78" />
+    <SolidColorBrush x:Key="SecondaryTextBrush" Color="#FF45454E" />
+    <SolidColorBrush x:Key="TertiaryTextBrush" Color="#FF4A4A54" />
     <SolidColorBrush x:Key="SeparatorBrush" Color="#1F000000" />
     <SolidColorBrush x:Key="ControlFillBrush" Color="#0F000000" />
     <SolidColorBrush x:Key="SidebarBrush" Color="#08000000" />
@@ -40,15 +43,17 @@
          CheckBox 勾选后的底色、AccentButtonStyle 等）的 AccentFillColorDefault 取的是
          SystemAccentColorDark1～Dark3，不是 Light1～Light3——Light1～Light3 只在深色主题下
          才会用到。不加 Dark1～Dark3 的话，这些控件会退回用户 Windows 系统设置的强调色
-         （可能是紫色、绿色），和我们的 #005A9E 对不上。Light1～Light3 保留（无害，浅色主题下
-         用不到，以后万一切回深色主题还能用）。 -->
-    <Color x:Key="SystemAccentColor">#FF005A9E</Color>
-    <Color x:Key="SystemAccentColorLight1">#FF005A9E</Color>
-    <Color x:Key="SystemAccentColorLight2">#FF005A9E</Color>
-    <Color x:Key="SystemAccentColorLight3">#FF005A9E</Color>
-    <Color x:Key="SystemAccentColorDark1">#FF005A9E</Color>
-    <Color x:Key="SystemAccentColorDark2">#FF005A9E</Color>
-    <Color x:Key="SystemAccentColorDark3">#FF005A9E</Color>
+         （可能是紫色、绿色），和我们的强调色对不上。Light1～Light3 保留（无害，浅色主题下
+         用不到，以后万一切回深色主题还能用）。
+         T-018 评审 M-2：这 7 个键和 AccentColor 一起从 #FF005A9E 加深到 #FF00477F
+         （理由见上面 AccentColor 的注释）。 -->
+    <Color x:Key="SystemAccentColor">#FF00477F</Color>
+    <Color x:Key="SystemAccentColorLight1">#FF00477F</Color>
+    <Color x:Key="SystemAccentColorLight2">#FF00477F</Color>
+    <Color x:Key="SystemAccentColorLight3">#FF00477F</Color>
+    <Color x:Key="SystemAccentColorDark1">#FF00477F</Color>
+    <Color x:Key="SystemAccentColorDark2">#FF00477F</Color>
+    <Color x:Key="SystemAccentColorDark3">#FF00477F</Color>
 
     <!-- 图标字体按钮：仅设外观属性，交互状态（悬停/按下）沿用 Fluent 原生 Button 模板 -->
     <Style x:Key="IconButton" TargetType="Button">
