@@ -1,15 +1,17 @@
-﻿using System.Windows;
-using System.Windows.Controls;
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
 using MusicCore.ViewModels;
 
 namespace WinMusicPlayer.Views;
 
-public partial class SettingsPanel : UserControl
+public sealed partial class SettingsPanel : UserControl
 {
-    public SettingsPanel() => InitializeComponent();
-
-    private void OnResetOpacity(object sender, RoutedEventArgs e)
+    public SettingsPanel()
     {
-        if (DataContext is PlayerViewModel vm) vm.BackgroundOpacity = 1.0;
+        InitializeComponent();
     }
+
+    public PlayerViewModel ViewModel => App.ViewModel;
+
+    private void OnResetOpacity(object sender, RoutedEventArgs e) => ViewModel.BackgroundOpacity = 1.0;
 }

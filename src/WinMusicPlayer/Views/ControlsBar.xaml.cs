@@ -1,81 +1,51 @@
-﻿using System.ComponentModel;
-using System.Windows;
-using System.Windows.Controls;
-using System.Windows.Controls.Primitives;
-using System.Windows.Input;
+using System.ComponentModel;
+using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 using MusicCore.ViewModels;
 
 namespace WinMusicPlayer.Views;
 
-public partial class ControlsBar : UserControl
+public sealed partial class ControlsBar : UserControl
 {
-    private PlayerViewModel? _viewModel;
-
-    /// <summary>拖动进度条期间不要让播放回调把滑块拽回去。</summary>
     private bool _isSeeking;
 
     public ControlsBar()
     {
         InitializeComponent();
-        Loaded += OnLoaded;
-        Unloaded += OnUnloaded;
 
-        // handledEventsToo 是关键：Slider / Thumb 的类处理器会先把鼠标按下事件
-        // 标记为 Handled，XAML 里注册的实例处理器因此收不到，单击轨道就没反应。
-        ProgressSlider.AddHandler(PreviewMouseLeftButtonDownEvent,
-            new MouseButtonEventHandler(OnSeekClick), handledEventsToo: true);
+        // handledEventsToo 必须为 true：Slider 自己会先处理指针事件并标记为已处理，
+        // 不这样挂的话，我们的处理函数收不到事件
+        ProgressSlider.AddHandler(PointerPressedEvent,
+            new PointerEventHandler((_, _) => _isSeeking = true), true);
+        ProgressSlider.AddHandler(PointerReleasedEvent,
+            new PointerEventHandler((_, _) => CommitSeek()), true);
+        ProgressSlider.AddHandler(PointerCaptureLostEvent,
+            new PointerEventHandler((_, _) => CommitSeek()), true);
+
+        ViewModel.PropertyChanged += OnViewModelPropertyChanged;
     }
 
-    private void OnLoaded(object sender, RoutedEventArgs e)
+    public PlayerViewModel ViewModel => App.ViewModel;
+
+    private void CommitSeek()
     {
-        if (_viewModel is not null) return;
-        _viewModel = DataContext as PlayerViewModel;
-        if (_viewModel is not null) _viewModel.PropertyChanged += OnViewModelChanged;
-    }
-
-    private void OnUnloaded(object sender, RoutedEventArgs e)
-    {
-        if (_viewModel is null) return;
-        _viewModel.PropertyChanged -= OnViewModelChanged;
-        _viewModel = null;
-    }
-
-    private void OnViewModelChanged(object? sender, PropertyChangedEventArgs e)
-    {
-        if (_isSeeking) return;
-
-        if (e.PropertyName == nameof(PlayerViewModel.CurrentTime))
-            ProgressSlider.Value = _viewModel!.CurrentTime;
-        else if (e.PropertyName == nameof(PlayerViewModel.CurrentIndex))
-            ProgressSlider.Value = 0;
-    }
-
-    private void OnSeekStarted(object sender, DragStartedEventArgs e) => _isSeeking = true;
-
-    private void OnSeekCompleted(object sender, DragCompletedEventArgs e)
-    {
+        if (!_isSeeking) return;      // 松开和捕获丢失可能先后都触发，只提交一次
         _isSeeking = false;
-        _viewModel?.Seek(ProgressSlider.Value);
+        ViewModel.Seek(ProgressSlider.Value);
     }
 
-    /// <summary>
-    /// 单击轨道跳位。不读 <c>ProgressSlider.Value</c>（那取决于 IsMoveToPointEnabled
-    /// 内部是否已经更新过），而是直接按点击位置换算成时间，行为可预期。
-    /// 落在滑块上的按下交给拖动流程处理。
-    /// </summary>
-    private void OnSeekClick(object sender, MouseButtonEventArgs e)
+    private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (_viewModel is null) return;
-        if (e.OriginalSource is Thumb || _isSeeking) return;
+        if (_isSeeking) return;       // 正在拖动时不要被播放引擎的回调拽回去
 
-        var width = ProgressSlider.ActualWidth;
-        var span = ProgressSlider.Maximum - ProgressSlider.Minimum;
-        if (width <= 0 || span <= 0) return;
-
-        var ratio = Math.Clamp(e.GetPosition(ProgressSlider).X / width, 0, 1);
-        var target = ProgressSlider.Minimum + ratio * span;
-
-        ProgressSlider.Value = target;
-        _viewModel.Seek(target);
+        switch (e.PropertyName)
+        {
+            case nameof(PlayerViewModel.CurrentTime):
+                ProgressSlider.Value = ViewModel.CurrentTime;
+                break;
+            case nameof(PlayerViewModel.CurrentIndex):
+                ProgressSlider.Value = 0;   // 和基线一致，切歌时立刻归零
+                break;
+        }
     }
 }

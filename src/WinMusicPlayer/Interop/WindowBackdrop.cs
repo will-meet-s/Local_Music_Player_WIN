@@ -1,98 +1,60 @@
-﻿using System.Runtime.InteropServices;
-using System.Windows;
-using System.Windows.Interop;
-using System.Windows.Media;
+using System.Runtime.InteropServices;
+using Microsoft.UI;
+using Microsoft.UI.Composition.SystemBackdrops;
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
+using WinRT.Interop;
 
 namespace WinMusicPlayer.Interop;
 
 /// <summary>
-/// 给窗口套上系统的亚克力 / 云母材质，对应 macOS 版的 NSVisualEffectView 磨砂。
-/// <para>
-/// 走 DWM 的 <c>DwmSetWindowAttribute</c>。这套属性是 <b>Windows 11 22H2 (build 22621)</b>
-/// 才有的，更早的系统上调用会被忽略 —— 窗口退化为普通纯色背景，功能不受影响。
-/// </para>
+/// 给窗口套上系统的亚克力材质。Win11 22H2（build 22621）及以上用 WinUI 的
+/// <see cref="DesktopAcrylicBackdrop"/>；更早的系统退化为不透明纯色背景，功能不受影响，
+/// 这一点和基线一致（README「与 macOS 版的差异」），不算新增行为。
 /// </summary>
-public static class WindowBackdrop
+internal static class WindowBackdrop
 {
-    private const int DwmwaSystemBackdropType = 38;
     private const int DwmwaUseImmersiveDarkMode = 20;
-
-    /// <summary>亚克力（半透明模糊，能透出桌面）。</summary>
-    private const int BackdropAcrylic = 3;
+    private const int MinimumAcrylicBuild = 22621;
 
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
 
-    [DllImport("dwmapi.dll")]
-    private static extern int DwmExtendFrameIntoClientArea(IntPtr hwnd, ref Margins margins);
-
-    /// <summary>四边都取 -1 即「整窗玻璃」，让 DWM 在整个客户区里绘制材质。</summary>
-    [StructLayout(LayoutKind.Sequential)]
-    private struct Margins
-    {
-        public int Left, Right, Top, Bottom;
-    }
-
-    public static bool IsSupported =>
-        Environment.OSVersion.Version.Build >= 22621;
-
     /// <summary>
-    /// 上一次启用尝试的细节（系统 build、两次 DWM 调用的 HRESULT、合成表面是否清掉）。
-    /// 材质这东西成不成只能看返回值，界面上看不出「调用被拒绝」和「被别的东西盖住」的区别。
+    /// 上一次启用尝试的细节（系统 build、深色标题栏的 HRESULT、材质是否启用）。
+    /// 材质这东西成不成只能看返回值，界面上看不出「不支持」和「被别的东西盖住」的区别。
     /// </summary>
     public static string? Diagnostics { get; private set; }
 
     /// <summary>
-    /// 启用亚克力背景。必须在窗口句柄创建之后调用，且窗口背景要设成透明，
-    /// 否则 WPF 自己画的底色会把材质挡住。
+    /// 启用亚克力背景。<paramref name="root"/> 的背景必须显式清空——WinUI 窗口默认是
+    /// 主题背景色，SystemBackdrop 只有在根元素背景透明时才画得出来。
     /// </summary>
-    /// <returns>DWM 接受了设置且合成表面已清空时为 true。</returns>
-    public static bool TryApplyAcrylic(Window window, bool darkMode = true)
+    public static bool Apply(Window window, Panel root)
     {
-        var handle = new WindowInteropHelper(window).Handle;
-        if (handle == IntPtr.Zero)
+        var hwnd = WindowNative.GetWindowHandle(window);
+        // T-018：程序固定浅色外观，这里传 0——不然 Win11 画的窗口外边框和 Alt+空格 弹出的系统菜单
+        // 仍然是深色样式，和 RequestedTheme="Light" 不是一套（T-018 漏改，评审时发现）
+        var darkMode = 0;
+        var darkHr = DwmSetWindowAttribute(hwnd, DwmwaUseImmersiveDarkMode, ref darkMode, sizeof(int));
+        var build = Environment.OSVersion.Version.Build;
+
+        if (build >= MinimumAcrylicBuild && DesktopAcrylicController.IsSupported())
         {
-            Diagnostics = "窗口句柄尚未创建，调用时机过早";
-            return false;
+            window.SystemBackdrop = new ThinAcrylicBackdrop();
+            // 设透明，不设 null：null 会让空白区域收不到鼠标点击
+            root.Background = new SolidColorBrush(Colors.Transparent);
+            // inactive=keep：标记用的是自建的 SystemBackdropConfiguration（IsInputActive 恒为 true），
+            // 失焦也不会退化成纯色（DEF-006），和旧版 GetDefaultSystemBackdropConfiguration 的行为区分开
+            Diagnostics = $"build={build} acrylic=thin darkHr=0x{darkHr:X8} inactive=keep";
+            return true;
         }
 
-        if (!IsSupported)
-        {
-            // 老系统上给一个近似的半透明底色，至少不是死板的纯色
-            window.Background = new SolidColorBrush(Color.FromArgb(0xF2, 0x1E, 0x1E, 0x22));
-            Diagnostics = $"build={Environment.OSVersion.Version.Build}，低于 22621，无 DWM 材质";
-            return false;
-        }
-
-        var dark = darkMode ? 1 : 0;
-        var darkHr = DwmSetWindowAttribute(handle, DwmwaUseImmersiveDarkMode, ref dark, sizeof(int));
-
-        var backdrop = BackdropAcrylic;
-        var backdropHr = DwmSetWindowAttribute(handle, DwmwaSystemBackdropType, ref backdrop, sizeof(int));
-
-        // 只设 backdrop type 不够：客户区默认不参与 DWM 的材质合成，
-        // 把 WPF 背景清空后看到的是纯黑而不是磨砂。必须把框架扩展到整个
-        // 客户区（四边 -1），DWM 才会在这块区域里画材质。
-        var margins = new Margins { Left = -1, Right = -1, Top = -1, Bottom = -1 };
-        var frameHr = DwmExtendFrameIntoClientArea(handle, ref margins);
-
-        // 让 DWM 的材质透上来。两层都要清：
-        // 1) WPF 逻辑层的窗口背景刷；
-        // 2) HwndSource 的合成表面底色 —— 它默认不透明，会把材质整块盖住，
-        //    只改 (1) 的话看到的仍是这层底色，表现为「调不透明度只有色深变化」。
-        window.Background = Brushes.Transparent;
-
-        var cleared = false;
-        if (HwndSource.FromHwnd(handle) is { CompositionTarget: { } target })
-        {
-            target.BackgroundColor = Colors.Transparent;
-            cleared = true;
-        }
-
-        Diagnostics = $"build={Environment.OSVersion.Version.Build} " +
-                      $"darkHr=0x{darkHr:X8} backdropHr=0x{backdropHr:X8} " +
-                      $"frameHr=0x{frameHr:X8} compositionCleared={cleared}";
-
-        return backdropHr == 0 && frameHr == 0 && cleared;
+        // 老系统：不透明的纯色底。BackdropLayer 叠在它上面，调不透明度时只有颜色深浅变化，和基线一致。
+        // 和 ThinAcrylicBackdrop、NowPlayingDrawer 共用同一个退化色常量（T-017 评审 M-1）
+        root.Background = new SolidColorBrush(BackdropColors.Fallback);
+        Diagnostics = $"build={build} acrylic=off darkHr=0x{darkHr:X8}";
+        return false;
     }
 }

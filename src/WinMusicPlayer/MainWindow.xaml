@@ -1,20 +1,18 @@
-﻿<Window x:Class="WinMusicPlayer.MainWindow"
-        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:views="clr-namespace:WinMusicPlayer.Views"
-        Title="音乐播放器"
-        Width="1080" Height="700"
-        MinWidth="880" MinHeight="560"
-        WindowStartupLocation="CenterScreen"
-        Foreground="{StaticResource TextBrush}"
-        TextOptions.TextFormattingMode="Ideal">
+<Window
+    x:Class="WinMusicPlayer.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:views="using:WinMusicPlayer.Views">
 
     <Grid x:Name="RootLayer">
-        <!-- 背景层单独一层，透明度只作用于它，文字和控件始终 100% 不透明 -->
-        <Rectangle x:Name="BackdropLayer" Fill="#FF1A1A1E" Opacity="1" />
+        <!-- 背景层单独一层，透明度只作用于它；文字和控件始终 100% 不透明 -->
+        <Rectangle x:Name="BackdropLayer" Fill="{StaticResource BaseBackgroundBrush}"
+                   Opacity="{x:Bind ViewModel.BackgroundOpacity, Mode=OneWay}" />
 
         <Grid>
             <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
@@ -23,60 +21,97 @@
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
+            <!-- DEF-004：自绘标题栏，和内容区共用同一层亚克力/底色层，不要放任何可交互控件——
+                 整块都靠 SetTitleBar 交给系统当拖动区域 -->
+            <Grid x:Name="AppTitleBar" Grid.Row="0" Height="32" Background="Transparent">
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <Image Source="ms-appx:///Resources/AppIcon.png"
+                           Width="16" Height="16" Margin="12,0,0,0"
+                           VerticalAlignment="Center" />
+                    <TextBlock x:Name="AppTitleText" Text="音乐播放器"
+                               Margin="8,0,0,0" FontSize="12"
+                               Foreground="{StaticResource TextBrush}"
+                               VerticalAlignment="Center" />
+                </StackPanel>
+            </Grid>
+
             <!-- 顶栏 -->
-            <Grid Grid.Row="0" Margin="14,10">
+            <Grid Grid.Row="1" Margin="14,10">
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
 
-                <Button Grid.Column="0" Style="{StaticResource IconButton}"
-                        Command="{Binding ChooseFolderCommand}"
-                        ToolTip="选择音乐文件夹">
-                    <StackPanel Orientation="Horizontal">
-                        <!-- 图标比文字略大一点才压得住，但不能沿用样式里 16 的字号，
-                             那个尺寸是给纯图标按钮定的，和文字并排会显得笨重 -->
-                        <TextBlock FontFamily="{StaticResource IconFont}" Text="&#xE8B7;"
-                                   FontSize="15" VerticalAlignment="Center" />
-                        <!-- 必须显式指定正文字体：父级 IconButton 的图标字体没有 CJK 字形 -->
-                        <TextBlock Text="选择文件夹" Margin="7,0,0,0"
-                                   FontFamily="{StaticResource UiFont}" FontSize="13"
-                                   VerticalAlignment="Center" />
-                    </StackPanel>
-                </Button>
+                <!-- 选择文件夹、刷新 -->
+                <StackPanel x:Name="TopBarLeftHost" Grid.Column="0"
+                            Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button Style="{StaticResource IconButton}"
+                            Command="{x:Bind ViewModel.ChooseFolderCommand}"
+                            ToolTipService.ToolTip="选择音乐文件夹">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock FontFamily="{StaticResource IconFont}" Text="&#xE8B7;"
+                                       FontSize="15" VerticalAlignment="Center" />
+                            <TextBlock Text="选择文件夹" Margin="7,0,0,0"
+                                       FontFamily="{StaticResource UiFont}" FontSize="13"
+                                       VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
 
-                <Button Grid.Column="1" Style="{StaticResource IconButton}"
-                        Content="&#xE72C;" Margin="4,0,0,0"
-                        Command="{Binding RefreshCommand}"
-                        Visibility="{Binding HasFolder, Converter={StaticResource BoolToVisibility}}"
-                        ToolTip="重新扫描该文件夹，同步新增或删除的歌曲（不打断播放）" />
+                    <Button Style="{StaticResource IconButton}"
+                            Content="&#xE72C;" Margin="4,0,0,0"
+                            Command="{x:Bind ViewModel.RefreshCommand}"
+                            Visibility="{x:Bind ViewModel.HasFolder, Mode=OneWay}"
+                            ToolTipService.ToolTip="重新扫描该文件夹，同步新增或删除的歌曲（不打断播放）" />
+                </StackPanel>
 
-                <TextBlock Grid.Column="2" Margin="10,0"
+                <!-- 文件夹路径 -->
+                <TextBlock Grid.Column="1" Margin="10,0"
                            VerticalAlignment="Center"
                            Foreground="{StaticResource SecondaryTextBrush}"
                            TextTrimming="CharacterEllipsis"
-                           Text="{Binding FolderPath}"
-                           ToolTip="{Binding FolderPath}" />
+                           Text="{x:Bind ViewModel.FolderPath, Mode=OneWay}"
+                           ToolTipService.ToolTip="{x:Bind ViewModel.FolderPath, Mode=OneWay}" />
 
-                <TextBlock Grid.Column="3" VerticalAlignment="Center"
-                           Margin="0,0,8,0"
-                           Foreground="{StaticResource SecondaryTextBrush}">
-                    <Run Text="共 " /><Run Text="{Binding LibraryCount, Mode=OneWay}" /><Run Text=" 首" />
-                </TextBlock>
+                <!-- 曲目总数 -->
+                <StackPanel x:Name="TopBarRightHost" Grid.Column="2"
+                            Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Margin="0,0,8,0"
+                               Foreground="{StaticResource SecondaryTextBrush}"
+                               Text="{x:Bind views:ViewFormat.TrackCount(ViewModel.LibraryCount), Mode=OneWay}" />
+                </StackPanel>
 
-                <Button Grid.Column="4" Style="{StaticResource IconButton}"
-                        Content="&#xE713;" Click="OnOpenSettings"
-                        ToolTip="设置" />
+                <Button x:Name="SettingsButton" Grid.Column="3"
+                        Style="{StaticResource IconButton}"
+                        Content="&#xE713;"
+                        ToolTipService.ToolTip="设置">
+                    <!-- 点击自动弹出：设置了 Button.Flyout 后 WinUI 会自动接管点击，不需要额外的 Click 处理 -->
+                    <Button.Flyout>
+                        <Flyout x:Name="SettingsFlyout" Placement="Bottom">
+                            <Flyout.FlyoutPresenterStyle>
+                                <Style TargetType="FlyoutPresenter">
+                                    <Setter Property="Background" Value="{StaticResource SettingsPanelBrush}" />
+                                    <Setter Property="BorderBrush" Value="{StaticResource DialogBorderBrush}" />
+                                    <Setter Property="BorderThickness" Value="1" />
+                                    <Setter Property="CornerRadius" Value="10" />
+                                    <Setter Property="Padding" Value="16" />
+                                    <Setter Property="MaxWidth" Value="400" />
+                                </Style>
+                            </Flyout.FlyoutPresenterStyle>
+                            <StackPanel x:Name="SettingsHost" MinWidth="220">
+                                <views:SettingsPanel />
+                            </StackPanel>
+                        </Flyout>
+                    </Button.Flyout>
+                </Button>
             </Grid>
 
-            <Border Grid.Row="1" Height="1" Background="{StaticResource SeparatorBrush}" />
+            <Border Grid.Row="2" Height="1" Background="{StaticResource SeparatorBrush}" />
 
             <!-- 错误提示条 -->
-            <Border Grid.Row="2" Background="#33FF9500" Padding="14,8"
-                    Visibility="{Binding HasError, Converter={StaticResource BoolToVisibility}}">
+            <Border Grid.Row="3" Background="#33FF9500" Padding="14,8"
+                    Visibility="{x:Bind ViewModel.HasError, Mode=OneWay}">
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto" />
@@ -86,37 +121,50 @@
                     <TextBlock Grid.Column="0" FontFamily="{StaticResource IconFont}"
                                Text="&#xE7BA;" Foreground="Orange" VerticalAlignment="Center" />
                     <TextBlock Grid.Column="1" Margin="8,0" TextWrapping="Wrap"
-                               Text="{Binding ErrorMessage}" VerticalAlignment="Center" />
+                               Text="{x:Bind ViewModel.ErrorMessage, Mode=OneWay}" VerticalAlignment="Center" />
                     <Button Grid.Column="2" Style="{StaticResource IconButton}"
-                            Content="&#xE711;" Click="OnDismissError" />
+                            Content="&#xE711;" Click="OnDismissError"
+                            ToolTipService.ToolTip="关闭" />
                 </Grid>
             </Border>
 
-            <!-- 主体：左列表 + 右正在播放 -->
-            <Grid Grid.Row="3">
+            <!-- 提示条（T-008 Notice，和错误提示条分开显示，界面接入方案 v1 §2.2） -->
+            <InfoBar x:Name="NoticeBar" Grid.Row="4"
+                     Severity="Informational"
+                     Message="{x:Bind ViewModel.Notice, Mode=OneWay}"
+                     IsOpen="{x:Bind views:ViewFormat.VisibleIfNotEmptyBool(ViewModel.Notice), Mode=OneWay}"
+                     CloseButtonClick="OnNoticeCloseButtonClick" />
+
+            <!-- 主体：左栏页签（曲库｜歌单｜播放列表） + 右正在播放/歌词 -->
+            <Grid Grid.Row="5">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="340" MinWidth="260" MaxWidth="480" />
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" MinWidth="360" />
                 </Grid.ColumnDefinitions>
 
-                <views:TrackListView Grid.Column="0" />
+                <!-- UI-1：曲库｜歌单｜播放列表三个页签 -->
+                <Grid x:Name="TrackListHost" Grid.Column="0">
+                    <views:LibraryPane />
+                </Grid>
 
-                <GridSplitter Grid.Column="1" Width="1"
-                              HorizontalAlignment="Stretch"
-                              Background="{StaticResource SeparatorBrush}" />
+                <!-- WinUI 没有 GridSplitter，T-001 先放一条固定分隔线 -->
+                <Border Grid.Column="1" Width="1" Background="{StaticResource SeparatorBrush}" />
 
-                <views:NowPlayingView Grid.Column="2" />
+                <!-- T-005：歌词与正在播放；T-017（CR-W1）：播放列表抽屉叠在上层，声明顺序排在
+                     NowPlayingView 之后，Tab 顺序也在它之后（W-6） -->
+                <Grid x:Name="NowPlayingHost" Grid.Column="2">
+                    <views:NowPlayingView />
+                    <views:NowPlayingDrawer />
+                </Grid>
             </Grid>
 
-            <Border Grid.Row="4" Height="1" Background="{StaticResource SeparatorBrush}" />
+            <Border Grid.Row="6" Height="1" Background="{StaticResource SeparatorBrush}" />
 
-            <views:ControlsBar Grid.Row="5" />
+            <!-- T-004：播放控制栏 -->
+            <Border x:Name="ControlsHost" Grid.Row="7">
+                <views:ControlsBar />
+            </Border>
         </Grid>
-
-        <!-- 设置浮层 -->
-        <Popup x:Name="SettingsPopup" Placement="Center" StaysOpen="False" AllowsTransparency="True">
-            <views:SettingsPanel />
-        </Popup>
     </Grid>
 </Window>

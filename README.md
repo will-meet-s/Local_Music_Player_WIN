@@ -1,6 +1,6 @@
 # WinMusicPlayer
 
-Windows 本地音乐播放器。C# + WPF (.NET 10)，与 [MacMusicPlayer](https://github.com/will-meet-s/Local_Music_Player_MAC)
+Windows 本地音乐播放器。C# + WinUI 3（Windows App SDK 1.7，.NET 10），与 [MacMusicPlayer](https://github.com/will-meet-s/Local_Music_Player_MAC)
 功能对齐，另加**桌面歌词**。
 
 ## 功能
@@ -14,30 +14,49 @@ Windows 本地音乐播放器。C# + WPF (.NET 10)，与 [MacMusicPlayer](https:
 - 搜索（歌名 / 歌手 / 专辑）与排序（文件顺序 / 歌曲名 / 歌手名，可升降序）
 - 无缝切歌（gapless）、音量归一化（ReplayGain）、独占输出（WASAPI Exclusive，可选）
 - 右侧区域三种展示模式：封面 + 歌词 / 只看封面 / 只看歌词
-- 亚克力半透明窗口背景，不透明度可调
+- **歌单**：新建、重命名、删除，往歌单里添加和移除歌曲、调整顺序、搜索，一键播放
+- **播放列表**：控制条上的「播放列表」按钮打开右侧抽屉，可下一首播放、加到末尾、移除、拖动排序、
+  清空、存为歌单；重启后自动恢复
+- **浅色外观**：固定浅色，不跟随系统的浅色 / 深色设置
+- 亚克力半透明窗口背景（浅色），不透明度可调
 - 托盘常驻：关掉主窗口后继续放歌
 - 记住上次的文件夹、播放模式、音量、排序、布局、桌面歌词位置
 
 ## 环境要求
 
 - Windows 10 1809+（FLAC / ALAC 解码依赖系统自带的 Media Foundation 解码器）
-- .NET 10 SDK（开发）/ .NET 10 桌面运行时（运行）
+- 开发：.NET 10 SDK。WinUI 3 工程只能在 Windows 上编译；团队的 CI 在 GitHub Actions 的 Windows 机器上构建和跑单测
+- 运行：不需要预先安装 .NET 或 Windows App SDK 运行时，发布产物是自包含的
 
 ## 构建运行
+
+**开发运行**（需要 Windows 和 .NET 10 SDK，这条路径只用于开发调试）：
 
 ```powershell
 dotnet restore
 dotnet test                                     # 跑单元测试
 dotnet run --project src\WinMusicPlayer          # 直接运行
+```
 
-# 发布成单个 exe（自带运行时，对方不用装 .NET）
+**发布单个 exe**：
+
+```powershell
 dotnet publish src\WinMusicPlayer -p:PublishProfile=win-x64
 ```
 
-产物是 `publish\win-x64\WinMusicPlayer.exe`，**只有这一个文件**，可以随意拷到桌面或别的机器。
-参数都写在 `src\WinMusicPlayer\Properties\PublishProfiles\win-x64.pubxml` 里，其中
-`IncludeNativeLibrariesForSelfExtract` 是关键 —— 少了它，WPF 的原生库会散落在 exe 旁边，
-单独把 exe 拖走就打不开。
+产物是 `publish\win-x64\WinMusicPlayer.exe`，**只有这一个文件**，自带 .NET 和 Windows App SDK
+运行时，目标机器不用安装任何东西，可以随意拷到桌面或别的机器。第一次运行时会把内置的文件解压到
+`%TEMP%\.net\WinMusicPlayer\`，之后再启动就不再解压。关键参数写在
+`src\WinMusicPlayer\Properties\PublishProfiles\win-x64.pubxml` 里，其中
+`IncludeAllContentForSelfExtract` 决定了 WinUI 的资源能不能打进 exe。
+
+**从 CI 下载**：在 GitHub Actions 里打开对应的 run → 拉到页面最下方的 Artifacts → 下载
+`WinMusicPlayer-win-x64-single`。解压后，`win-x64` 目录里只有一个 exe，`manifest` 目录里是
+「本包包含」清单（`本包包含.txt`：提交号、构建时间、这个包相对基线新增的提交列表）。分发以这个
+产物为准。
+
+也可以在 GitHub 上按提交号下载源码 ZIP，在本机执行上面的 `dotnet publish` 来构建（业主验收用的
+就是这种方式）。
 
 也可以直接用 Visual Studio 2022 打开 `WinMusicPlayer.sln`。
 
@@ -47,9 +66,21 @@ dotnet publish src\WinMusicPlayer -p:PublishProfile=win-x64
 |---|---|
 | [NAudio](https://github.com/naudio/NAudio) | 音频解码与 WASAPI 输出 |
 | [TagLibSharp](https://github.com/mono/taglib-sharp) | 标签读取：ID3v2 / Vorbis Comment / MP4 atom / APE |
+| Microsoft.WindowsAppSDK（1.7.250310001） | WinUI 3 界面、窗口与系统背景材质，以自包含方式随程序发布 |
+| Microsoft.Windows.SDK.BuildTools（10.0.26100.1742） | 构建时用到的 Windows SDK 工具 |
 
 读旧版中文 `.lrc` 需要的 GB18030 编码由框架自带的 `CodePagesEncodingProvider` 提供
 （.NET 10 已内置，不再需要 `System.Text.Encoding.CodePages` 包引用）。
+
+## 歌单与播放列表
+
+- 左栏有「曲库」「歌单」两个页签
+- 播放列表在右侧抽屉里，盖在「正在播放」区上，点外面不会收起，开关状态会被记住
+- 播放列表和歌单是两回事：在歌单里点播以后，播放列表就是这个歌单的一份拷贝，之后改歌单不影响
+  正在播放的列表
+- 文件找不到的歌会显示为「不可用」，播放时自动跳过，不会自动删除
+- 数据保存在 `%APPDATA%\WinMusicPlayer\`（`songlists\` 目录和 `nowplaying.json`），删掉这个
+  目录就清空全部歌单和播放列表，**不会修改或删除任何音乐文件**
 
 ## 桌面歌词
 
@@ -59,7 +90,8 @@ dotnet publish src\WinMusicPlayer -p:PublishProfile=win-x64
 - **拖动**：鼠标按住任意位置拖走，位置会被记住
 - **工具条**：鼠标移上去出现，可调字号（16–72）、切换 5 种配色、锁定、关闭
 - **锁定**：开启鼠标穿透，点击直接落到底下的窗口，不会挡住桌面图标。
-  锁定后浮层自己收不到点击了，**解锁要走托盘菜单**的「锁定桌面歌词」
+  **解锁**：鼠标停在歌词上约半秒，浮层顶部中间会出现解锁图标，点一下即可。关闭桌面歌词再打开时会
+  自动解锁；退出程序再启动，仍保持锁定。托盘菜单里没有锁定 / 解锁项
 - 文字带黑色外发光描边 —— 桌面壁纸明暗不定，没有它在浅色背景上会看不清
 - 没有逐行歌词时退而显示曲名，不留空白
 
@@ -129,40 +161,55 @@ WASAPI Exclusive 模式：绕过系统混音器，用文件原生采样率直推
 
 | macOS | Windows | 说明 |
 |---|---|---|
-| `NSVisualEffectView` 磨砂 | DWM 亚克力 | 需 Win11 22H2+；更早的系统退化为半透明纯色，功能不受影响 |
-| 菜单栏状态项 | 系统托盘 | 用 WinForms `NotifyIcon`，右键菜单而非弹出面板 |
+| `NSVisualEffectView` 磨砂 | WinUI 3 亚克力（`DesktopAcrylicBackdrop`） | 需 Win11 22H2+；更早的系统退化为不透明纯色，功能不受影响 |
+| 菜单栏状态项 | 系统托盘 | 用 Win32 `Shell_NotifyIcon`，右键菜单而非弹出面板 |
 | CoreAudio 采样率匹配 | WASAPI 独占模式 | Windows 上的对应做法 |
 | 自研 FLAC Vorbis Comment 解析 | 删除 | TagLib# 原生支持，不必手写 |
 | `⌘Q` 等快捷键 | 删除 | macOS 版实测未生效，不移植 |
-| `.icns` / `.dmg` | `.ico` / 单文件 exe | — |
+| `.icns` / `.dmg` | `.ico` / 单文件 exe（自包含 WinUI 3） | — |
 | — | **桌面歌词** | Windows 版新增 |
 
 ## 代码结构
 
 ```
 src/
-  MusicCore/                    纯逻辑 + 播放引擎，不引用 WPF
+  MusicCore/                    纯逻辑 + 播放引擎，不引用任何界面框架
     Models/                     Track / LyricLine / PlayMode / NowPlayingLayout
     Library/                    LibraryScanner、NaturalStringComparer、
-                                MetadataLoader（TagLib#）、TrackFilter（搜索排序）
+                                MetadataLoader（TagLib#）、TrackFilter（搜索排序）、
+                                TrackIdentity、TrackCatalog、AvailabilityChecker
     Lyrics/                     LrcParser、LyricsProvider
     Playback/                   PlaybackQueue（顺序逻辑）、ReplayGain、
-                                AudioSource、GaplessSampleProvider、PlayerEngine
+                                AudioSource、GaplessSampleProvider、PlayerEngine、
+                                NowPlayingList、NowPlayingStore
+    Songlists/                  SonglistService / SonglistStore / SonglistName
+                                （歌单的读写和校验）
     Support/                    Preferences（JSON）、TimeFormat
-    ViewModels/                 PlayerViewModel（UI 唯一数据源）
-  WinMusicPlayer/               WPF 外壳
+    ViewModels/                 PlayerViewModel（UI 唯一数据源）、
+                                SonglistsViewModel、SonglistDetailViewModel
+  WinMusicPlayer/               WinUI 3 外壳（非打包、自包含）
     Views/                      TrackListView / NowPlayingView / LyricsView /
-                                ControlsBar / SettingsPanel / LayoutThumbnail
-    Interop/                    WindowBackdrop（亚克力）、ClickThrough（鼠标穿透）
+                                ControlsBar / SettingsPanel / LayoutThumbnail /
+                                LibraryPane / NowPlayingDrawer / NowPlayingListView /
+                                SonglistsHost / SonglistListView / SonglistDetailView /
+                                SonglistNameDialog / TrackMenus / SelectionOrder /
+                                ViewFormat（x:Bind 用的格式化函数）
+    Themes/                     Colors.xaml（配色与按钮样式）
+    Interop/                    WindowBackdrop（亚克力、标题栏与内容区一体）、WindowSizing、
+                                TransparentBackdrop / ClickThrough / TextOutline（桌面歌词）、
+                                TrayIcon（托盘）、NativeMessageBox
     DesktopLyricsWindow         桌面歌词浮层
-    TrayIcon                    托盘常驻
-tests/MusicCore.Tests/          LrcParser / PlaybackQueue / TrackFilter /
-                                ReplayGain / LibraryScanner / LyricsProvider
+    CrashLog                    崩溃与诊断日志
+tests/MusicCore.Tests/          LrcParser / PlaybackQueue / TrackFilter / ReplayGain /
+                                LibraryScanner / LyricsProvider / PlayerEngineGapless /
+                                Preferences
+.github/workflows/build.yml     CI：Windows 上构建、单测、发布单文件
 ```
 
-`PlaybackQueue`、`LrcParser`、`TrackFilter`、`ReplayGain`、`NaturalStringComparer`
-都是不碰音频设备的纯逻辑，可完整单测；`PlayerEngine`、`MetadataLoader` 依赖真实音频文件
-与输出设备，由手动验收覆盖。
+`PlaybackQueue`、`LrcParser`、`TrackFilter`、`ReplayGain`、`NaturalStringComparer`、
+`Preferences`（配置文件格式）都是不碰音频设备的纯逻辑，可以完整单测；`PlayerEngine`
+的无缝切歌由 `PlayerEngineGaplessTests` 用假输出设备覆盖；`MetadataLoader` 和真实的
+音频输出依赖真实文件和设备，由手动验收覆盖。界面层不写单测，由测试用例在 Windows 上验收。
 
 ## 已知限制
 
@@ -170,3 +217,4 @@ tests/MusicCore.Tests/          LrcParser / PlaybackQueue / TrackFilter /
 - 桌面歌词不支持逐字卡拉 OK 效果（需要增强型 LRC，普通 `.lrc` 没有这个信息）
 - WAV 没有标准歌词标签，只能靠同名 `.lrc`
 - 未做代码签名，SmartScreen 首次运行会提示「未知发布者」，点「仍要运行」即可
+- Windows 10 默认没有 Segoe Fluent Icons 字体，播放 / 暂停按钮的图标会显示为空白（基线的 WPF 版也是这样）

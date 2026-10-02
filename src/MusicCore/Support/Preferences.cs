@@ -1,4 +1,5 @@
-﻿using System.Text.Json;
+﻿using System.Text;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using MusicCore.Library;
 using MusicCore.Models;
@@ -55,11 +56,32 @@ public sealed class Preferences
     public bool DesktopLyricsLocked { get; set; }
     public string DesktopLyricsColor { get; set; } = "#FF7DD3FC";
 
+    /// <summary>播放列表抽屉的开关状态（T-017，CR-W1）。旧文件里没有这个字段时按 false 处理
+    /// （<c>bool</c> 默认值），不需要迁移。</summary>
+    public bool NowPlayingDrawerOpen { get; set; }
+
     [JsonIgnore]
     public static string FilePath { get; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "WinMusicPlayer",
         "settings.json");
+
+    /// <summary>只做 JSON 解析，不碰文件系统，方便单测覆盖配置格式。</summary>
+    internal static Preferences Parse(string json)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<Preferences>(json, JsonOptions) ?? new Preferences();
+        }
+        catch (JsonException)
+        {
+            // 配置损坏不该拦住启动，用默认值继续
+            return new Preferences();
+        }
+    }
+
+    /// <summary>只做 JSON 序列化，不碰文件系统，方便单测覆盖配置格式。</summary>
+    internal string Serialize() => JsonSerializer.Serialize(this, JsonOptions);
 
     public static Preferences Load()
     {
@@ -67,30 +89,66 @@ public sealed class Preferences
         {
             if (!File.Exists(FilePath)) return new Preferences();
             var json = File.ReadAllText(FilePath);
-            return JsonSerializer.Deserialize<Preferences>(json, JsonOptions) ?? new Preferences();
+            return Parse(json);
         }
-        catch (Exception e) when (e is IOException or JsonException or UnauthorizedAccessException)
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             // 配置损坏不该拦住启动，用默认值继续
             return new Preferences();
         }
     }
 
+    /// <summary>SEC-05（安全审计 2026-10-01）：原来直接 <see cref="File.WriteAllText(string, string)"/>
+    /// 整个文件，写到一半被杀（断电、强制结束进程）会把 <c>settings.json</c> 截断成一半的 JSON，
+    /// 下次 <see cref="Load"/> 解析失败，回退默认值，等于把文件夹、音量、桌面歌词这些设置全部丢光。
+    /// 改成写临时文件再 <see cref="File.Move(string, string, bool)"/> 原地替换（同一个磁盘卷上是原子操作），
+    /// 写法照搬 <see cref="MusicCore.Playback.NowPlayingStore"/> 已经评审过的那一套（SEC-01、SEC-03a）。</summary>
     public void Save()
     {
         try
         {
             lock (SaveGate)
             {
-                var directory = Path.GetDirectoryName(FilePath)!;
-                Directory.CreateDirectory(directory);
-                File.WriteAllText(FilePath, JsonSerializer.Serialize(this, JsonOptions));
+                SaveToFile(FilePath, Serialize());
             }
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             // 存不下就算了，不值得打断用户
         }
+    }
+
+    /// <summary>核心逻辑抽出 <paramref name="filePath"/> 参数，方便单测写到临时目录，
+    /// 不碰真实的 <see cref="FilePath"/>（SEC-05 单测）。</summary>
+    internal static void SaveToFile(string filePath, string json)
+    {
+        var directory = Path.GetDirectoryName(filePath)!;
+        Directory.CreateDirectory(directory);
+
+        var tmpPath = $"{filePath}.tmp-{Environment.ProcessId}";
+        try
+        {
+            WriteTempFile(tmpPath, json);
+            File.Move(tmpPath, filePath, overwrite: true);
+        }
+        catch
+        {
+            TryDelete(tmpPath);
+            throw;
+        }
+    }
+
+    private static void WriteTempFile(string tmpPath, string json)
+    {
+        var bytes = new UTF8Encoding(false).GetBytes(json);
+        using var fs = new FileStream(tmpPath, FileMode.Create, FileAccess.Write, FileShare.None);
+        fs.Write(bytes, 0, bytes.Length);
+        fs.Flush(true);
+    }
+
+    private static void TryDelete(string path)
+    {
+        try { File.Delete(path); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
     }
 
     public static double ClampOpacity(double value) => Math.Clamp(value, MinBackgroundOpacity, 1.0);

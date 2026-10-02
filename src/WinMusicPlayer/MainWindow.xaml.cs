@@ -1,83 +1,163 @@
-﻿using System.ComponentModel;
-using System.IO;
-using System.Windows;
-using Microsoft.Win32;
+using System.ComponentModel;
+using Microsoft.UI;
+using Microsoft.UI.Dispatching;
+using Microsoft.UI.Windowing;
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
 using MusicCore.ViewModels;
 using WinMusicPlayer.Interop;
+using WinMusicPlayer.Views;
+using WinRT.Interop;
+using Windows.Storage.Pickers;
+using Windows.UI;
 
 namespace WinMusicPlayer;
 
-public partial class MainWindow : Window
+public sealed partial class MainWindow : Window
 {
-    private readonly PlayerViewModel _viewModel;
+    private bool _sizingInitialized;
+    private double _lastRasterizationScale;
+    private bool _picking;
 
-    public MainWindow(PlayerViewModel viewModel)
+    private readonly DispatcherQueueTimer _noticeTimer;
+
+    public MainWindow()
     {
         InitializeComponent();
 
-        _viewModel = viewModel;
-        DataContext = viewModel;
+        var applied = WindowBackdrop.Apply(this, RootLayer);
+        CrashLog.WriteNote(applied ? "Backdrop-ok" : "Backdrop-fallback",
+            WindowBackdrop.Diagnostics ?? "(无诊断信息)");
 
-        _viewModel.FolderPickRequested += PickFolder;
-        _viewModel.PropertyChanged += OnViewModelChanged;
+        Title = "音乐播放器";
+        AppWindow.Title = "音乐播放器";
+        AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Resources", "AppIcon.ico"));
 
-        SourceInitialized += (_, _) =>
+        // DEF-004：标题栏延伸进内容区，和内容区共用同一层亚克力/底色层，不再是系统画的那一块纯色
+        ExtendsContentIntoTitleBar = true;
+        SetTitleBar(AppTitleBar);
+        ApplyTitleBarButtonColors();
+
+        RootLayer.Loaded += OnRootLoaded;
+        AppWindow.Closing += OnAppWindowClosing;
+        Activated += OnWindowActivated;
+
+        // 主窗口只创建一次，不需要退订
+        App.ViewModel.FolderPickRequested += PickFolder;
+
+        // Notice 提示条（T-008，界面接入方案 v1 §2.2）：3 秒后自动关闭，用户手动关闭时同样清空
+        _noticeTimer = DispatcherQueue.CreateTimer();
+        _noticeTimer.Interval = TimeSpan.FromSeconds(3);
+        _noticeTimer.IsRepeating = false;
+        _noticeTimer.Tick += (_, _) => ViewModel.Notice = null;
+        ViewModel.PropertyChanged += OnNoticeViewModelPropertyChanged;
+    }
+
+    private void OnNoticeViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(PlayerViewModel.Notice)) return;
+
+        _noticeTimer.Stop();
+        if (ViewModel.Notice is not null) _noticeTimer.Start();
+    }
+
+    private void OnNoticeCloseButtonClick(InfoBar sender, object args) => ViewModel.Notice = null;
+
+    /// <summary>各视图统一通过它拿到唯一的 ViewModel 实例，再用 x:Bind 绑定。</summary>
+    public PlayerViewModel ViewModel => App.ViewModel;
+
+    /// <summary>供 T-002 的 FolderPicker 做 InitializeWithWindow 用。</summary>
+    public IntPtr Hwnd => WindowNative.GetWindowHandle(this);
+
+    private void OnRootLoaded(object sender, RoutedEventArgs e)
+    {
+        // 根 Grid 的 Loaded 是第一次能拿到 XamlRoot（从而拿到缩放比例）的地方
+        if (_sizingInitialized) return;
+        _sizingInitialized = true;
+
+        _lastRasterizationScale = RootLayer.XamlRoot.RasterizationScale;
+        WindowSizing.Initialize(AppWindow, _lastRasterizationScale);
+
+        RootLayer.XamlRoot.Changed += OnXamlRootChanged;
+    }
+
+    private void OnXamlRootChanged(XamlRoot sender, XamlRootChangedEventArgs args)
+    {
+        if (sender.RasterizationScale == _lastRasterizationScale) return;
+
+        _lastRasterizationScale = sender.RasterizationScale;
+        WindowSizing.ApplyMinimumSize(AppWindow, _lastRasterizationScale);
+    }
+
+    /// <summary>
+    /// 关窗不退出：取消关闭并隐藏窗口，托盘图标还在，播放继续。真正退出走托盘菜单的
+    /// 「退出」→ App.Quit()，那时 IsQuitting 已经是 true，这里不会再取消。
+    /// </summary>
+    private void OnAppWindowClosing(AppWindow sender, AppWindowClosingEventArgs args)
+    {
+        if (!((App)Application.Current).IsQuitting)
         {
-            var applied = WindowBackdrop.TryApplyAcrylic(this);
-            // 成功与否都记一笔：材质没出来时，这行是区分「DWM 拒绝」和
-            // 「被上层不透明元素盖住」的唯一依据
-            CrashLog.WriteNote(applied ? "Backdrop-ok" : "Backdrop-failed",
-                WindowBackdrop.Diagnostics ?? "(无诊断信息)");
-        };
-        Loaded += (_, _) => ApplyBackdropOpacity();
-        Closed += OnClosed;
+            args.Cancel = true;
+            sender.Hide();
+        }
     }
 
     /// <summary>
-    /// .NET 8 起 WPF 自带目录选择框，不必再借 WinForms 的 FolderBrowserDialog。
+    /// 右上角三个系统按钮背景透明，前景色用我们自己的文字色——
+    /// 否则延伸进内容区以后，这三个按钮还是系统默认的浅色，和深色主题不搭。
     /// </summary>
-    private void PickFolder()
+    private void ApplyTitleBarButtonColors()
     {
-        var dialog = new OpenFolderDialog
+        var foreground = ViewFormat.ResourceColor("TextBrush", Color.FromArgb(0xFF, 0x1B, 0x1B, 0x1F));
+        var inactiveForeground = ViewFormat.ResourceColor("SecondaryTextBrush", Color.FromArgb(0xFF, 0x45, 0x45, 0x4E));
+        var hoverBackground = ViewFormat.ResourceColor("TitleBarButtonHoverColor", Color.FromArgb(0x0F, 0x00, 0x00, 0x00));
+        var pressedBackground = ViewFormat.ResourceColor("TitleBarButtonPressedColor", Color.FromArgb(0x1A, 0x00, 0x00, 0x00));
+
+        var tb = AppWindow.TitleBar;
+        tb.ButtonBackgroundColor = Colors.Transparent;
+        tb.ButtonInactiveBackgroundColor = Colors.Transparent;
+        tb.ButtonForegroundColor = foreground;
+        tb.ButtonInactiveForegroundColor = inactiveForeground;
+        tb.ButtonHoverBackgroundColor = hoverBackground;
+        tb.ButtonHoverForegroundColor = foreground;
+        tb.ButtonPressedBackgroundColor = pressedBackground;
+        tb.ButtonPressedForegroundColor = foreground;
+        // 关闭按钮悬停时的红色由系统自己处理，不用设置
+    }
+
+    /// <summary>失焦时标题文字退化成二级文字色，和系统标题栏的习惯一致。</summary>
+    private void OnWindowActivated(object sender, WindowActivatedEventArgs args)
+    {
+        AppTitleText.Foreground = args.WindowActivationState == WindowActivationState.Deactivated
+            ? ViewFormat.ResourceBrush("SecondaryTextBrush", Color.FromArgb(0xFF, 0x45, 0x45, 0x4E))
+            : ViewFormat.ResourceBrush("TextBrush", Color.FromArgb(0xFF, 0x1B, 0x1B, 0x1F));
+    }
+
+    private void OnDismissError(object sender, RoutedEventArgs e) => ViewModel.ErrorMessage = null;
+
+    private async void PickFolder()
+    {
+        if (_picking) return;          // 防止连点弹出两个选择框
+        _picking = true;
+        try
         {
-            Title = "选择包含音乐文件的文件夹",
-            Multiselect = false
-        };
+            var picker = new FolderPicker
+            {
+                SuggestedStartLocation = PickerLocationId.MusicLibrary,
+                SettingsIdentifier = "WinMusicPlayer.MusicFolder",
+                CommitButtonText = "选择此文件夹"
+            };
+            picker.FileTypeFilter.Add("*");
+            InitializeWithWindow.Initialize(picker, Hwnd);
 
-        if (_viewModel.FolderPath is { } current && Directory.Exists(current))
-            dialog.InitialDirectory = current;
-        else
-            dialog.InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.MyMusic);
-
-        if (dialog.ShowDialog(this) == true)
-            _viewModel.Scan(dialog.FolderName);
-    }
-
-    private void OnViewModelChanged(object? sender, PropertyChangedEventArgs e)
-    {
-        if (e.PropertyName == nameof(PlayerViewModel.BackgroundOpacity))
-            ApplyBackdropOpacity();
-    }
-
-    /// <summary>
-    /// 只调背景层的透明度。若改 Window.Opacity，文字和控件会跟着一起变淡，
-    /// 拉到 20% 就没法看了。
-    /// </summary>
-    private void ApplyBackdropOpacity() =>
-        BackdropLayer.Opacity = _viewModel.BackgroundOpacity;
-
-    private void OnOpenSettings(object sender, RoutedEventArgs e) =>
-        SettingsPopup.IsOpen = !SettingsPopup.IsOpen;
-
-    private void OnDismissError(object sender, RoutedEventArgs e) =>
-        _viewModel.ErrorMessage = null;
-
-    /// <summary>
-    /// 关窗不退出 App —— 托盘图标还在，歌继续放。退出走托盘菜单的「退出」。
-    /// </summary>
-    private void OnClosed(object? sender, EventArgs e)
-    {
-        _viewModel.FolderPickRequested -= PickFolder;
-        _viewModel.PropertyChanged -= OnViewModelChanged;
+            var folder = await picker.PickSingleFolderAsync();
+            if (folder is not null) ViewModel.Scan(folder.Path);   // 点「取消」时返回 null，什么都不做
+        }
+        catch (Exception e)
+        {
+            ViewModel.ErrorMessage = $"无法打开文件夹选择框：{e.Message}";
+            CrashLog.Write("FolderPicker", e);
+        }
+        finally { _picking = false; }
     }
 }

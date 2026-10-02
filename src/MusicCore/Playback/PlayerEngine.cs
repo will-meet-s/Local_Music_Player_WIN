@@ -32,7 +32,21 @@ public sealed class PlayerEngine : IDisposable
 
     private float _volume = 0.8f;
     private bool _hasPreloaded;
+
+    /// <summary>
+    /// 音频线程已切到下一首、但 UI 线程还没执行 <see cref="Advanced"/> 推进队列位置的窗口期。
+    /// 这段窗口内 <see cref="ProvideNext"/> 看到的队列位置仍是切歌前的，禁止预加载，
+    /// 否则会把刚切过去的这首再预加载一遍（MPC-391）。只在 <see cref="_gate"/> 锁内读写。
+    /// </summary>
+    private bool _advancePending;
+
     private double _lastReportedPosition = -1;
+
+    /// <summary>
+    /// 输出设备工厂，供单元测试注入假设备。生产环境不设置时使用真实 <see cref="WasapiOut"/>。
+    /// </summary>
+    internal Func<AudioClientShareMode, int, IWavePlayer> OutputFactory { get; set; } =
+        (mode, latency) => new WasapiOut(mode, latency);
 
     public PlayerEngine()
     {
@@ -63,6 +77,7 @@ public sealed class PlayerEngine : IDisposable
     /// <summary>
     /// 引擎需要预加载下一首时调用。返回 null 表示没有下一首。
     /// <para><b>不得有副作用</b> —— 调用时当前曲还在播，播放队列的位置不能动。</para>
+    /// <para>始终在创建引擎的线程（UI 线程）上调用，且在 <see cref="Advanced"/> 事件处理完之后调用。</para>
     /// </summary>
     public Func<PlayableItem?>? ProvideNext { get; set; }
 
@@ -116,6 +131,7 @@ public sealed class PlayerEngine : IDisposable
 
             _pipeline!.SetCurrent(source);
             _hasPreloaded = false;
+            _advancePending = false;
             _lastReportedPosition = -1;
 
             var duration = source.Duration;
@@ -179,6 +195,7 @@ public sealed class PlayerEngine : IDisposable
             _output?.Stop();
             _pipeline?.SetCurrent(null);
             _hasPreloaded = false;
+            _advancePending = false;
         }
 
         Post(() => Progress?.Invoke(0));
@@ -209,7 +226,7 @@ public sealed class PlayerEngine : IDisposable
 
         lock (_gate)
         {
-            if (_hasPreloaded || _pipeline is null || _pipeline.IsEmpty) return;
+            if (_hasPreloaded || _pipeline is null || _pipeline.IsEmpty || _advancePending) return;
             _hasPreloaded = true;
         }
 
@@ -246,7 +263,7 @@ public sealed class PlayerEngine : IDisposable
 
         var volumeStage = new VolumeSampleProvider(pipeline) { Volume = _volume };
 
-        var output = new WasapiOut(
+        var output = OutputFactory(
             ExclusiveMode ? AudioClientShareMode.Exclusive : AudioClientShareMode.Shared,
             ExclusiveMode ? 50 : 120);
 
@@ -280,16 +297,21 @@ public sealed class PlayerEngine : IDisposable
 
     private void OnPipelineAdvanced(PlayableItem item)
     {
-        lock (_gate) _hasPreloaded = false;
+        lock (_gate)
+        {
+            _hasPreloaded = false;
+            _advancePending = true; // 窗口开始：队列还没推进，禁止预加载
+        }
 
         Post(() =>
         {
-            Advanced?.Invoke(item);
+            Advanced?.Invoke(item); // ① 先让 VM 推进队列
             var duration = _pipeline?.Duration ?? 0;
             if (duration > 0) DurationResolved?.Invoke(duration);
-        });
 
-        PreloadNextIfNeeded();
+            lock (_gate) _advancePending = false; // ② 窗口结束
+            PreloadNextIfNeeded(); // ③ 此时 PeekNext 看到的是新位置
+        });
     }
 
     private void OnPipelineExhausted()
