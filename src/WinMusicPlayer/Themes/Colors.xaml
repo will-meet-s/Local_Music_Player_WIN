@@ -34,12 +34,21 @@
     <FontFamily x:Key="ContentControlThemeFontFamily">Segoe UI, Microsoft YaHei UI</FontFamily>
 
     <!-- 让 Fluent 控件（CheckBox、ToggleSwitch 等）的强调色与 AccentColor 一致（T-018 同步更新，
-         方案 §2.2 没有单独列出这 4 个键，但它们本来就是跟着 AccentColor 走的，不跟着改会和
-         按钮、当前行的强调色不一样） -->
+         方案 §2.2 没有单独列出这几个键，但它们本来就是跟着 AccentColor 走的，不跟着改会和
+         按钮、当前行的强调色不一样）。
+         T-018 评审 M-1：浅色主题下，Fluent 控件（滑块已拖过部分、ToggleSwitch 打开时的底色、
+         CheckBox 勾选后的底色、AccentButtonStyle 等）的 AccentFillColorDefault 取的是
+         SystemAccentColorDark1～Dark3，不是 Light1～Light3——Light1～Light3 只在深色主题下
+         才会用到。不加 Dark1～Dark3 的话，这些控件会退回用户 Windows 系统设置的强调色
+         （可能是紫色、绿色），和我们的 #005A9E 对不上。Light1～Light3 保留（无害，浅色主题下
+         用不到，以后万一切回深色主题还能用）。 -->
     <Color x:Key="SystemAccentColor">#FF005A9E</Color>
     <Color x:Key="SystemAccentColorLight1">#FF005A9E</Color>
     <Color x:Key="SystemAccentColorLight2">#FF005A9E</Color>
     <Color x:Key="SystemAccentColorLight3">#FF005A9E</Color>
+    <Color x:Key="SystemAccentColorDark1">#FF005A9E</Color>
+    <Color x:Key="SystemAccentColorDark2">#FF005A9E</Color>
+    <Color x:Key="SystemAccentColorDark3">#FF005A9E</Color>
 
     <!-- 图标字体按钮：仅设外观属性，交互状态（悬停/按下）沿用 Fluent 原生 Button 模板 -->
     <Style x:Key="IconButton" TargetType="Button">
