@@ -34,8 +34,10 @@ internal static class WindowBackdrop
     public static bool Apply(Window window, Panel root)
     {
         var hwnd = WindowNative.GetWindowHandle(window);
-        var dark = 1;
-        var darkHr = DwmSetWindowAttribute(hwnd, DwmwaUseImmersiveDarkMode, ref dark, sizeof(int));
+        // T-018：程序固定浅色外观，这里传 0——不然 Win11 画的窗口外边框和 Alt+空格 弹出的系统菜单
+        // 仍然是深色样式，和 RequestedTheme="Light" 不是一套（T-018 漏改，评审时发现）
+        var darkMode = 0;
+        var darkHr = DwmSetWindowAttribute(hwnd, DwmwaUseImmersiveDarkMode, ref darkMode, sizeof(int));
         var build = Environment.OSVersion.Version.Build;
 
         if (build >= MinimumAcrylicBuild && DesktopAcrylicController.IsSupported())

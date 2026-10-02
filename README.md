@@ -14,7 +14,11 @@ Windows 本地音乐播放器。C# + WinUI 3（Windows App SDK 1.7，.NET 10）�
 - 搜索（歌名 / 歌手 / 专辑）与排序（文件顺序 / 歌曲名 / 歌手名，可升降序）
 - 无缝切歌（gapless）、音量归一化（ReplayGain）、独占输出（WASAPI Exclusive，可选）
 - 右侧区域三种展示模式：封面 + 歌词 / 只看封面 / 只看歌词
-- 亚克力半透明窗口背景，不透明度可调
+- **歌单**：新建、重命名、删除，往歌单里添加和移除歌曲、调整顺序、搜索，一键播放
+- **播放列表**：控制条上的「播放列表」按钮打开右侧抽屉，可下一首播放、加到末尾、移除、拖动排序、
+  清空、存为歌单；重启后自动恢复
+- **浅色外观**：固定浅色，不跟随系统的浅色 / 深色设置
+- 亚克力半透明窗口背景（浅色），不透明度可调
 - 托盘常驻：关掉主窗口后继续放歌
 - 记住上次的文件夹、播放模式、音量、排序、布局、桌面歌词位置
 
@@ -48,8 +52,11 @@ dotnet publish src\WinMusicPlayer -p:PublishProfile=win-x64
 
 **从 CI 下载**：在 GitHub Actions 里打开对应的 run → 拉到页面最下方的 Artifacts → 下载
 `WinMusicPlayer-win-x64-single`。解压后，`win-x64` 目录里只有一个 exe，`manifest` 目录里是
-「本包包含」清单（`本包包含.txt`：提交号、构建时间、这个包相对基线新增的提交列表）。验收和分发，
-都以这个产物为准。
+「本包包含」清单（`本包包含.txt`：提交号、构建时间、这个包相对基线新增的提交列表）。分发以这个
+产物为准。
+
+也可以在 GitHub 上按提交号下载源码 ZIP，在本机执行上面的 `dotnet publish` 来构建（业主验收用的
+就是这种方式）。
 
 也可以直接用 Visual Studio 2022 打开 `WinMusicPlayer.sln`。
 
@@ -65,6 +72,16 @@ dotnet publish src\WinMusicPlayer -p:PublishProfile=win-x64
 读旧版中文 `.lrc` 需要的 GB18030 编码由框架自带的 `CodePagesEncodingProvider` 提供
 （.NET 10 已内置，不再需要 `System.Text.Encoding.CodePages` 包引用）。
 
+## 歌单与播放列表
+
+- 左栏有「曲库」「歌单」两个页签
+- 播放列表在右侧抽屉里，盖在「正在播放」区上，点外面不会收起，开关状态会被记住
+- 播放列表和歌单是两回事：在歌单里点播以后，播放列表就是这个歌单的一份拷贝，之后改歌单不影响
+  正在播放的列表
+- 文件找不到的歌会显示为「不可用」，播放时自动跳过，不会自动删除
+- 数据保存在 `%APPDATA%\WinMusicPlayer\`（`songlists\` 目录和 `nowplaying.json`），删掉这个
+  目录就清空全部歌单和播放列表，**不会修改或删除任何音乐文件**
+
 ## 桌面歌词
 
 在设置面板勾选「显示桌面歌词」，或右键托盘图标 →「桌面歌词」。
@@ -73,7 +90,8 @@ dotnet publish src\WinMusicPlayer -p:PublishProfile=win-x64
 - **拖动**：鼠标按住任意位置拖走，位置会被记住
 - **工具条**：鼠标移上去出现，可调字号（16–72）、切换 5 种配色、锁定、关闭
 - **锁定**：开启鼠标穿透，点击直接落到底下的窗口，不会挡住桌面图标。
-  锁定后浮层自己收不到点击了，**解锁要走托盘菜单**的「锁定桌面歌词」
+  **解锁**：鼠标停在歌词上约半秒，浮层顶部中间会出现解锁图标，点一下即可。关闭桌面歌词再打开时会
+  自动解锁；退出程序再启动，仍保持锁定。托盘菜单里没有锁定 / 解锁项
 - 文字带黑色外发光描边 —— 桌面壁纸明暗不定，没有它在浅色背景上会看不清
 - 没有逐行歌词时退而显示曲名，不留空白
 
@@ -158,18 +176,26 @@ src/
   MusicCore/                    纯逻辑 + 播放引擎，不引用任何界面框架
     Models/                     Track / LyricLine / PlayMode / NowPlayingLayout
     Library/                    LibraryScanner、NaturalStringComparer、
-                                MetadataLoader（TagLib#）、TrackFilter（搜索排序）
+                                MetadataLoader（TagLib#）、TrackFilter（搜索排序）、
+                                TrackIdentity、TrackCatalog、AvailabilityChecker
     Lyrics/                     LrcParser、LyricsProvider
     Playback/                   PlaybackQueue（顺序逻辑）、ReplayGain、
-                                AudioSource、GaplessSampleProvider、PlayerEngine
+                                AudioSource、GaplessSampleProvider、PlayerEngine、
+                                NowPlayingList、NowPlayingStore
+    Songlists/                  SonglistService / SonglistStore / SonglistName
+                                （歌单的读写和校验）
     Support/                    Preferences（JSON）、TimeFormat
-    ViewModels/                 PlayerViewModel（UI 唯一数据源）
+    ViewModels/                 PlayerViewModel（UI 唯一数据源）、
+                                SonglistsViewModel、SonglistDetailViewModel
   WinMusicPlayer/               WinUI 3 外壳（非打包、自包含）
     Views/                      TrackListView / NowPlayingView / LyricsView /
                                 ControlsBar / SettingsPanel / LayoutThumbnail /
+                                LibraryPane / NowPlayingDrawer / NowPlayingListView /
+                                SonglistsHost / SonglistListView / SonglistDetailView /
+                                SonglistNameDialog / TrackMenus / SelectionOrder /
                                 ViewFormat（x:Bind 用的格式化函数）
     Themes/                     Colors.xaml（配色与按钮样式）
-    Interop/                    WindowBackdrop（亚克力、深色标题栏）、WindowSizing、
+    Interop/                    WindowBackdrop（亚克力、标题栏与内容区一体）、WindowSizing、
                                 TransparentBackdrop / ClickThrough / TextOutline（桌面歌词）、
                                 TrayIcon（托盘）、NativeMessageBox
     DesktopLyricsWindow         桌面歌词浮层
