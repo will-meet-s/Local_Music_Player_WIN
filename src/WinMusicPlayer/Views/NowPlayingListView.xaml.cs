@@ -238,8 +238,8 @@ public sealed partial class NowPlayingListView : UserControl
 
         if (FindDescendant(container, "TitleText") is TextBlock title)
             title.Foreground = isCurrent
-                ? ViewFormat.ResourceBrush("AccentBrush", Color.FromArgb(0xFF, 0x5C, 0xA8, 0xFF))
-                : ViewFormat.ResourceBrush("TextBrush", Color.FromArgb(0xFF, 0xF2, 0xF2, 0xF5));
+                ? ViewFormat.ResourceBrush("AccentBrush", Color.FromArgb(0xFF, 0x00, 0x5A, 0x9E))
+                : ViewFormat.ResourceBrush("TextBrush", Color.FromArgb(0xFF, 0x1B, 0x1B, 0x1F));
     }
 
     private static FrameworkElement? FindDescendant(DependencyObject root, string name)

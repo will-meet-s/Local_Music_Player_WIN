@@ -14,27 +14,27 @@
                 <!-- 封面 + 歌词 -->
                 <StackPanel x:Name="GlyphBoth" VerticalAlignment="Center">
                     <Rectangle Width="11" Height="11" RadiusX="2" RadiusY="2"
-                               Fill="#B8FFFFFF" HorizontalAlignment="Center" />
+                               Fill="{StaticResource ThumbnailStrongBrush}" HorizontalAlignment="Center" />
                     <Rectangle Width="26" Height="2" RadiusX="1" RadiusY="1"
-                               Fill="#70FFFFFF" Margin="0,3,0,0" HorizontalAlignment="Center" />
+                               Fill="{StaticResource ThumbnailWeakBrush}" Margin="0,3,0,0" HorizontalAlignment="Center" />
                     <Rectangle Width="19" Height="2" RadiusX="1" RadiusY="1"
-                               Fill="#70FFFFFF" Margin="0,3,0,0" HorizontalAlignment="Center" />
+                               Fill="{StaticResource ThumbnailWeakBrush}" Margin="0,3,0,0" HorizontalAlignment="Center" />
                 </StackPanel>
 
                 <!-- 只看封面 -->
                 <Rectangle x:Name="GlyphArtwork" Visibility="Collapsed"
-                           RadiusX="3" RadiusY="3" Fill="#B8FFFFFF" />
+                           RadiusX="3" RadiusY="3" Fill="{StaticResource ThumbnailStrongBrush}" />
 
                 <!-- 只看歌词 -->
                 <StackPanel x:Name="GlyphLyrics" Visibility="Collapsed" VerticalAlignment="Center">
                     <Rectangle Width="26" Height="2" RadiusX="1" RadiusY="1"
-                               Fill="#70FFFFFF" HorizontalAlignment="Center" />
+                               Fill="{StaticResource ThumbnailWeakBrush}" HorizontalAlignment="Center" />
                     <Rectangle Width="20" Height="2" RadiusX="1" RadiusY="1"
-                               Fill="#70FFFFFF" Margin="0,4,0,0" HorizontalAlignment="Center" />
+                               Fill="{StaticResource ThumbnailWeakBrush}" Margin="0,4,0,0" HorizontalAlignment="Center" />
                     <Rectangle Width="24" Height="2" RadiusX="1" RadiusY="1"
-                               Fill="#70FFFFFF" Margin="0,4,0,0" HorizontalAlignment="Center" />
+                               Fill="{StaticResource ThumbnailWeakBrush}" Margin="0,4,0,0" HorizontalAlignment="Center" />
                     <Rectangle Width="16" Height="2" RadiusX="1" RadiusY="1"
-                               Fill="#70FFFFFF" Margin="0,4,0,0" HorizontalAlignment="Center" />
+                               Fill="{StaticResource ThumbnailWeakBrush}" Margin="0,4,0,0" HorizontalAlignment="Center" />
                 </StackPanel>
             </Grid>
         </Border>

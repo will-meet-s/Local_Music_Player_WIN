@@ -27,7 +27,9 @@ internal sealed class ThinAcrylicBackdrop : SystemBackdrop
         // 不用系统默认的那份配置：它会跟着窗口激活状态走，失焦时 IsInputActive 变 false，
         // 亚克力就退化成纯色（DEF-006）。这里自建配置，始终保持 IsInputActive = true，
         // 让亚克力无论激活与否都保持半透明
-        _config = new SystemBackdropConfiguration { IsInputActive = true, Theme = SystemBackdropTheme.Dark };
+        // T-018（CR-W3）：程序固定浅色外观，这里也要跟着改成 Light，否则亚克力材质本身的色调
+        // 混合逻辑仍按深色算，会和 BackdropLayer、Colors.xaml 的浅色不一致
+        _config = new SystemBackdropConfiguration { IsInputActive = true, Theme = SystemBackdropTheme.Light };
         _controller.SetSystemBackdropConfiguration(_config);
         _controller.AddSystemBackdropTarget(target);
     }

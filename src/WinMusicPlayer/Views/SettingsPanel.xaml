@@ -54,7 +54,8 @@
                            Text="{x:Bind views:ViewFormat.Percent(ViewModel.BackgroundOpacity), Mode=OneWay}" />
             </Grid>
 
-            <Slider Minimum="0.2" Maximum="1" StepFrequency="0.01" IsThumbToolTipEnabled="False"
+            <Slider Minimum="{x:Bind views:ViewFormat.MinBackgroundOpacity}"
+                    Maximum="1" StepFrequency="0.01" IsThumbToolTipEnabled="False"
                     Value="{x:Bind ViewModel.BackgroundOpacity, Mode=TwoWay}" />
 
             <TextBlock TextWrapping="Wrap" FontSize="11" Margin="0,4,0,0" MaxWidth="360"

@@ -11,6 +11,11 @@ namespace WinMusicPlayer.Views;
 /// </summary>
 internal static class ViewFormat
 {
+    /// <summary>设置面板的不透明度滑块用（T-018 §2.1 第 10 项）：最低值只在
+    /// <see cref="Preferences.MinBackgroundOpacity"/> 这一个常量里定义，这里转一手给 x:Bind 用，
+    /// 不在 XAML 里重复写死 0.2——以后兜底规则要提高这个值时，只改那一个常量就行。</summary>
+    public static double MinBackgroundOpacity => Preferences.MinBackgroundOpacity;
+
     public static string TrackCount(int count) => $"共 {count} 首";
 
     public static string Time(double seconds) => TimeFormat.Format(seconds);
@@ -63,8 +68,8 @@ internal static class ViewFormat
 
     /// <summary>控制条「播放列表」按钮的开关样式（T-017 v1 §2.3）：打开时强调色，关闭时普通文字色。</summary>
     public static Brush DrawerButtonBrush(bool isOpen) => isOpen
-        ? ResourceBrush("AccentBrush", Windows.UI.Color.FromArgb(0xFF, 0x5C, 0xA8, 0xFF))
-        : ResourceBrush("TextBrush", Windows.UI.Color.FromArgb(0xFF, 0xF2, 0xF2, 0xF5));
+        ? ResourceBrush("AccentBrush", Windows.UI.Color.FromArgb(0xFF, 0x00, 0x5A, 0x9E))
+        : ResourceBrush("TextBrush", Windows.UI.Color.FromArgb(0xFF, 0x1B, 0x1B, 0x1F));
 
     /// <summary>短线指示器用 Opacity 而不是 Visibility（T-017 评审 M-2）：Collapsed 会让它所在的
     /// StackPanel 矮 4 px，按钮垂直居中，于是每次开关抽屉按钮就会跟着跳一下；一直占着位置、
@@ -84,5 +89,22 @@ internal static class ViewFormat
 
         CrashLog.WriteNote("Resource", $"missing {key}");
         return new SolidColorBrush(fallback);
+    }
+
+    /// <summary>标题栏按钮颜色用（T-018 §2.1 第 5 项，<c>AppWindowTitleBar</c> 要的是
+    /// <see cref="Windows.UI.Color"/>，不是 <see cref="Brush"/>）：资源可以是 <c>Color</c>
+    /// （比如 <c>TitleBarButtonHoverColor</c>），也可以是 <see cref="SolidColorBrush"/>
+    /// （比如 <c>TextBrush</c>），两种都取得到；查不到就回退到 <paramref name="fallback"/>，
+    /// 做法同 <see cref="ResourceBrush"/>。</summary>
+    internal static Windows.UI.Color ResourceColor(string key, Windows.UI.Color fallback)
+    {
+        if (Application.Current.Resources.TryGetValue(key, out var value))
+        {
+            if (value is Windows.UI.Color color) return color;
+            if (value is SolidColorBrush brush) return brush.Color;
+        }
+
+        CrashLog.WriteNote("Resource", $"missing {key}");
+        return fallback;
     }
 }

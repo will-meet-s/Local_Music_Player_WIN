@@ -108,15 +108,20 @@ public sealed partial class MainWindow : Window
     /// </summary>
     private void ApplyTitleBarButtonColors()
     {
+        var foreground = ViewFormat.ResourceColor("TextBrush", Color.FromArgb(0xFF, 0x1B, 0x1B, 0x1F));
+        var inactiveForeground = ViewFormat.ResourceColor("SecondaryTextBrush", Color.FromArgb(0xFF, 0x5C, 0x5C, 0x66));
+        var hoverBackground = ViewFormat.ResourceColor("TitleBarButtonHoverColor", Color.FromArgb(0x0F, 0x00, 0x00, 0x00));
+        var pressedBackground = ViewFormat.ResourceColor("TitleBarButtonPressedColor", Color.FromArgb(0x1A, 0x00, 0x00, 0x00));
+
         var tb = AppWindow.TitleBar;
         tb.ButtonBackgroundColor = Colors.Transparent;
         tb.ButtonInactiveBackgroundColor = Colors.Transparent;
-        tb.ButtonForegroundColor = ColorHelper.FromArgb(0xFF, 0xF2, 0xF2, 0xF5);           // TextBrush
-        tb.ButtonInactiveForegroundColor = ColorHelper.FromArgb(0xFF, 0xA0, 0xA0, 0xAC);   // SecondaryTextBrush
-        tb.ButtonHoverBackgroundColor = ColorHelper.FromArgb(0x18, 0xFF, 0xFF, 0xFF);      // ControlFillBrush
-        tb.ButtonHoverForegroundColor = ColorHelper.FromArgb(0xFF, 0xF2, 0xF2, 0xF5);
-        tb.ButtonPressedBackgroundColor = ColorHelper.FromArgb(0x26, 0xFF, 0xFF, 0xFF);
-        tb.ButtonPressedForegroundColor = ColorHelper.FromArgb(0xFF, 0xF2, 0xF2, 0xF5);
+        tb.ButtonForegroundColor = foreground;
+        tb.ButtonInactiveForegroundColor = inactiveForeground;
+        tb.ButtonHoverBackgroundColor = hoverBackground;
+        tb.ButtonHoverForegroundColor = foreground;
+        tb.ButtonPressedBackgroundColor = pressedBackground;
+        tb.ButtonPressedForegroundColor = foreground;
         // 关闭按钮悬停时的红色由系统自己处理，不用设置
     }
 
@@ -124,8 +129,8 @@ public sealed partial class MainWindow : Window
     private void OnWindowActivated(object sender, WindowActivatedEventArgs args)
     {
         AppTitleText.Foreground = args.WindowActivationState == WindowActivationState.Deactivated
-            ? ViewFormat.ResourceBrush("SecondaryTextBrush", Color.FromArgb(0xFF, 0xA0, 0xA0, 0xAC))
-            : ViewFormat.ResourceBrush("TextBrush", Color.FromArgb(0xFF, 0xF2, 0xF2, 0xF5));
+            ? ViewFormat.ResourceBrush("SecondaryTextBrush", Color.FromArgb(0xFF, 0x5C, 0x5C, 0x66))
+            : ViewFormat.ResourceBrush("TextBrush", Color.FromArgb(0xFF, 0x1B, 0x1B, 0x1F));
     }
 
     private void OnDismissError(object sender, RoutedEventArgs e) => ViewModel.ErrorMessage = null;

@@ -6,7 +6,7 @@
 
     <Grid x:Name="RootLayer">
         <!-- 背景层单独一层，透明度只作用于它；文字和控件始终 100% 不透明 -->
-        <Rectangle x:Name="BackdropLayer" Fill="#FF1A1A1E"
+        <Rectangle x:Name="BackdropLayer" Fill="{StaticResource BaseBackgroundBrush}"
                    Opacity="{x:Bind ViewModel.BackgroundOpacity, Mode=OneWay}" />
 
         <Grid>
@@ -92,7 +92,7 @@
                             <Flyout.FlyoutPresenterStyle>
                                 <Style TargetType="FlyoutPresenter">
                                     <Setter Property="Background" Value="{StaticResource SettingsPanelBrush}" />
-                                    <Setter Property="BorderBrush" Value="#33FFFFFF" />
+                                    <Setter Property="BorderBrush" Value="{StaticResource DialogBorderBrush}" />
                                     <Setter Property="BorderThickness" Value="1" />
                                     <Setter Property="CornerRadius" Value="10" />
                                     <Setter Property="Padding" Value="16" />
