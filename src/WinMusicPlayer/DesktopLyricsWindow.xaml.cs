@@ -367,11 +367,21 @@ public sealed partial class DesktopLyricsWindow : Window
 
         // 锁定时把工具条藏死；解锁靠悬停出现的小按钮（DEF-007 v3），因为穿透后这里点不到
         LockButton.Content = locked ? "\uE72E" : "\uE785";
-        if (locked) Toolbar.Visibility = Visibility.Collapsed;
+        if (locked) SetToolbarShown(false);
         FitHeight();
 
         if (locked) StartHoverTimer();
         else StopHoverTimer();
+    }
+
+    /// <summary>
+    /// 工具条那一行始终占位，只切 Opacity/IsHitTestVisible，不切 Visibility——
+    /// 否则行高从 0 变成 Auto 会撑高窗口，把歌词往下挤（DEF-008）。不调 FitHeight()。
+    /// </summary>
+    private void SetToolbarShown(bool shown)
+    {
+        Toolbar.Opacity = shown ? 1 : 0;
+        Toolbar.IsHitTestVisible = shown;
     }
 
     // MARK: - 悬停解锁按钮（DEF-007 v3）
@@ -401,15 +411,14 @@ public sealed partial class DesktopLyricsWindow : Window
         GetWindowRect(_hwnd, out var lyr);
 
         var dpi = GetDpiForWindow(_hwnd);
-        var size = (int)Math.Round(32 * dpi / 96.0);
+        var scale = dpi / 96.0;
+        var size = (int)Math.Round(32 * scale);
 
-        var windowId = Win32Interop.GetWindowIdFromWindow(_hwnd);
-        var display = DisplayArea.GetFromWindowId(windowId, DisplayAreaFallback.Primary);
-        var workArea = display.WorkArea;
-
-        // 按钮放在浮层上边沿之外、水平居中；如果上方放不下，就放在浮层顶部的里面
+        // 按钮放在工具条那条占位带里，水平、垂直都居中（DEF-008）——这样就不会跑到
+        // 窗口顶边之外，也不用再按显示器工作区做越界判断
+        var bandPx = ToPx(Toolbar.ActualHeight + Toolbar.Margin.Bottom, scale);
         var bx = lyr.Left + (lyr.Width - size) / 2;
-        var by = lyr.Top - size >= workArea.Y ? lyr.Top - size : lyr.Top;
+        var by = lyr.Top + Math.Max(0, (bandPx - size) / 2);
 
         var inLyrics = Contains(lyr, pt);
         var buttonVisible = _unlockButton?.IsVisible ?? false;
@@ -498,14 +507,12 @@ public sealed partial class DesktopLyricsWindow : Window
 
     private void OnRootPointerEntered(object sender, PointerRoutedEventArgs e)
     {
-        if (!_settings.DesktopLyricsLocked) Toolbar.Visibility = Visibility.Visible;
-        FitHeight();
+        if (!_settings.DesktopLyricsLocked) SetToolbarShown(true);
     }
 
     private void OnRootPointerExited(object sender, PointerRoutedEventArgs e)
     {
-        Toolbar.Visibility = Visibility.Collapsed;
-        FitHeight();
+        SetToolbarShown(false);
     }
 
     private void OnRootPointerPressed(object sender, PointerRoutedEventArgs e)
@@ -517,6 +524,12 @@ public sealed partial class DesktopLyricsWindow : Window
         ReleaseCapture();
         // 借用系统的窗口移动循环：调用期间阻塞，拖动结束后才返回
         SendMessage(_hwnd, WmNclButtonDown, new IntPtr(HtCaption), IntPtr.Zero);
+
+        // 拖动/点击结束后，系统接管鼠标捕获期间 XAML 会先收到 PointerExited，工具条被藏起来；
+        // 松开以后鼠标往往还在浮层上，这里按实际光标位置重新判断一次，立刻把工具条带回来（DEF-008 B）
+        GetCursorPos(out var pt);
+        GetWindowRect(_hwnd, out var lyr);
+        if (Contains(lyr, pt)) SetToolbarShown(true);
 
         PersistGeometry();
     }

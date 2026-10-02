@@ -13,16 +13,20 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <!-- 工具条：锁定 / 字号 / 颜色 / 关闭 -->
+        <!-- 工具条：锁定 / 字号 / 颜色 / 关闭。始终占位（Opacity 0/1，不用 Visibility），
+             悬停显隐不会改变窗口高度，歌词不会被挤动（DEF-008） -->
         <Border x:Name="Toolbar" Grid.Row="0"
-                Visibility="Collapsed"
+                Opacity="0" IsHitTestVisible="False"
                 HorizontalAlignment="Center"
                 Margin="0,0,0,6" Padding="8,4" CornerRadius="6"
                 Background="#CC1E1E22">
+            <Border.OpacityTransition>
+                <ScalarTransition Duration="0:0:0.12" />
+            </Border.OpacityTransition>
             <StackPanel Orientation="Horizontal">
                 <Button x:Name="LockButton" Click="OnToggleLock"
                         Style="{StaticResource LyricsToolButton}"
-                        ToolTipService.ToolTip="锁定（锁定后鼠标穿透，不再挡住桌面。解锁：右键托盘图标 →「锁定桌面歌词」）" />
+                        ToolTipService.ToolTip="锁定（锁定后鼠标穿透，不再挡住桌面。解锁：鼠标停在歌词上，点出现的小图标）" />
                 <Button Click="OnFontSmaller" Style="{StaticResource LyricsToolButton}"
                         Content="&#xE738;" ToolTipService.ToolTip="缩小字号" />
                 <Button Click="OnFontLarger" Style="{StaticResource LyricsToolButton}"
