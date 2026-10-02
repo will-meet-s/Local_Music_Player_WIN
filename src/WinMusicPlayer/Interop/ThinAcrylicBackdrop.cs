@@ -21,7 +21,7 @@ internal sealed class ThinAcrylicBackdrop : SystemBackdrop
         base.OnTargetConnected(target, xamlRoot);
         _controller = new DesktopAcrylicController { Kind = DesktopAcrylicKind.Thin };
         // 把系统关闭「透明效果」或省电模式时的退化色固定成 BackdropColors.Fallback（T-017 评审
-        // M-1）：播放列表抽屉的 BlurLayer 用同一个常量兜底，两边退化后颜色才能保证一致（W-2）
+        // M-1），和 WindowBackdrop 的纯色兜底路径用同一个常量，不依赖系统自己算出来的值
         _controller.FallbackColor = BackdropColors.Fallback;
 
         // 不用系统默认的那份配置：它会跟着窗口激活状态走，失焦时 IsInputActive 变 false，

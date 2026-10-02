@@ -5,18 +5,17 @@ using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
 using MusicCore.Support;
 using MusicCore.ViewModels;
-using WinMusicPlayer.Interop;
-using Windows.UI;
 using Windows.UI.ViewManagement;
 
 namespace WinMusicPlayer.Views;
 
 /// <summary>
-/// 播放列表抽屉（T-017 v1，CR-W1）：叠在 <see cref="NowPlayingView"/> 上层，用
+/// 播放列表抽屉（T-017 v1.2，CR-W1、CR-W2）：叠在 <see cref="NowPlayingView"/> 上层，用
 /// <see cref="TranslateTransform"/> 从窗口右边缘滑入/滑出，开关状态持久化到
-/// <see cref="PlayerViewModel.IsNowPlayingDrawerOpen"/>。不设置 <c>AllowDrop</c>——
-/// 保持 SEC-04 的修复有效，从资源管理器往这里拖文件要被内层 <see cref="NowPlayingListView"/>
-/// 的 <c>OnDragOver</c> 拒绝，不能让抽屉自己先接住（方案 §5）。
+/// <see cref="PlayerViewModel.IsNowPlayingDrawerOpen"/>。背景始终不透明（CR-W2），不再跟着
+/// <see cref="PlayerViewModel.BackgroundOpacity"/> 变化，也不再需要退化色兜底。不设置
+/// <c>AllowDrop</c>——保持 SEC-04 的修复有效，从资源管理器往这里拖文件要被内层
+/// <see cref="NowPlayingListView"/> 的 <c>OnDragOver</c> 拒绝，不能让抽屉自己先接住（方案 §5）。
 /// </summary>
 public sealed partial class NowPlayingDrawer : UserControl
 {
@@ -29,17 +28,6 @@ public sealed partial class NowPlayingDrawer : UserControl
     public NowPlayingDrawer()
     {
         InitializeComponent();
-
-        // 退化色用固定常量，不读 DesktopAcrylicController.FallbackColor（T-017 评审 M-1）：
-        // MainWindow 的 InitializeComponent() 先构造这个控件，WindowBackdrop.Apply 后执行，
-        // 这里读到的永远是时序上还没赋值的默认颜色，不是系统真正用的那个退化色
-        BlurLayer.Fill = new AcrylicBrush
-        {
-            TintColor = Color.FromArgb(0xFF, 0x1A, 0x1A, 0x1E),
-            TintOpacity = 0,
-            TintLuminosityOpacity = 0,
-            FallbackColor = BackdropColors.Fallback
-        };
 
         ViewModel.PropertyChanged += OnViewModelPropertyChanged;
 

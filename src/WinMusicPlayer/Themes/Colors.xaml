@@ -12,6 +12,9 @@
     <SolidColorBrush x:Key="ControlFillBrush" Color="#18FFFFFF" />
     <SolidColorBrush x:Key="SidebarBrush" Color="#14FFFFFF" />
     <SolidColorBrush x:Key="PopupBrush" Color="#FF23232A" />
+    <!-- 播放列表抽屉的背景（T-017 v1.2 §0，CR-W2）：和主窗口 BackdropLayer 不透明度调到 100%
+         时的颜色相同，固定不透明，不随设置面板的不透明度滑块变化；以后要调色只改这一处 -->
+    <SolidColorBrush x:Key="DrawerBackgroundBrush" Color="#FF1A1A1E" />
 
     <FontFamily x:Key="IconFont">Segoe Fluent Icons, Segoe MDL2 Assets</FontFamily>
     <FontFamily x:Key="UiFont">Segoe UI</FontFamily>
