@@ -58,7 +58,7 @@
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
 
-                <ComboBox x:Name="SortBox" Grid.Column="0" Width="104"
+                <ComboBox x:Name="SortBox" Grid.Column="0" Width="104" CornerRadius="6"
                           SelectionChanged="OnSortBoxSelectionChanged">
                     <ComboBoxItem Content="文件顺序" />
                     <ComboBoxItem Content="歌曲名" />

@@ -87,4 +87,28 @@
         <Setter Property="Foreground" Value="White" />
     </Style>
 
+    <!-- T-018 补充（DEF-390-02）：系统控件默认的浅色样式和本程序配色不一致，统一成搜索框和
+         设置面板的风格。这个字典在 App.xaml 里排在 XamlControlsResources 之后合并，同名键
+         以这里为准（SystemAccentColor 用的也是这个机制），所以全局生效，不用改各个控件的 XAML。
+         下拉框（曲库排序，整个程序只有这一处）：底色和搜索框一致，去掉系统默认的渐变边框 -->
+    <StaticResource x:Key="ComboBoxBackground" ResourceKey="ControlFillBrush" />
+    <StaticResource x:Key="ComboBoxBackgroundFocused" ResourceKey="ControlFillBrush" />
+    <SolidColorBrush x:Key="ComboBoxBackgroundPointerOver" Color="#18000000" />
+    <SolidColorBrush x:Key="ComboBoxBackgroundPressed" Color="#1F000000" />
+    <SolidColorBrush x:Key="ComboBoxBorderBrush" Color="Transparent" />
+    <SolidColorBrush x:Key="ComboBoxBorderBrushPointerOver" Color="Transparent" />
+    <SolidColorBrush x:Key="ComboBoxBorderBrushPressed" Color="Transparent" />
+    <SolidColorBrush x:Key="ComboBoxBorderBrushFocused" Color="Transparent" />
+    <StaticResource x:Key="ComboBoxForeground" ResourceKey="TextBrush" />
+    <StaticResource x:Key="ComboBoxForegroundPointerOver" ResourceKey="TextBrush" />
+    <StaticResource x:Key="ComboBoxForegroundPressed" ResourceKey="TextBrush" />
+    <StaticResource x:Key="ComboBoxDropDownGlyphForeground" ResourceKey="SecondaryTextBrush" />
+    <!-- 展开的选项列表：改为不透明白底 + 细边框，和设置面板、右键菜单统一质感 -->
+    <StaticResource x:Key="ComboBoxDropDownBackground" ResourceKey="PopupBrush" />
+    <StaticResource x:Key="ComboBoxDropDownBorderBrush" ResourceKey="DialogBorderBrush" />
+    <!-- 右键菜单（曲库、歌单详情、抽屉、「添加到歌单」子菜单、歌单列表「重命名/删除」等共用）：
+         同样从系统默认的亚克力半透明改为不透明白底 + 细边框 -->
+    <StaticResource x:Key="MenuFlyoutPresenterBackground" ResourceKey="PopupBrush" />
+    <StaticResource x:Key="MenuFlyoutPresenterBorderBrush" ResourceKey="DialogBorderBrush" />
+
 </ResourceDictionary>
